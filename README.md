@@ -7,7 +7,7 @@
 ## Установка (Fedora 43+)
 
 ```bash
-git clone <адрес-репозитория> rice && cd rice
+git clone https://github.com/67taburetki67/fedoraas.git rice && cd rice
 ./install.sh            # спросит про раскладку клавиатуры и COPR для Hyprland
 ```
 Параметры: `--yes` (без вопросов), `--with-lock` (экран блокировки), `--layout us,ru`, `--no-packages`, `--dry-run`.

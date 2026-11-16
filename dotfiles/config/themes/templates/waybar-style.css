@@ -1,0 +1,21 @@
+@define-color bg #{{BG}};
+@define-color surface #{{SURFACE}};
+@define-color line #{{LINE}};
+@define-color muted #{{MUTED}};
+@define-color dim #{{DIM}};
+@define-color fg #{{FG}};
+@define-color bright #{{BRIGHT}};
+
+* { font-family: "JetBrains Mono"; font-size: 12px; border: none; border-radius: 0; min-height: 0; }
+window#waybar { background: transparent; color: @dim; }
+.modules-left, .modules-center, .modules-right {
+  background: alpha(@bg, 0.72);
+  border: 1px solid @line;
+  border-radius: 14px;
+  padding: 2px 8px;
+}
+#clock, #cpu, #memory, #network, #custom-notification { padding: 0 10px; transition: color 250ms ease; }
+#custom-notification:hover { color: @fg; }
+#custom-ws1, #custom-ws2, #custom-ws3, #custom-ws4, #custom-ws5 { padding: 0 9px; color: @muted; border-radius: 10px; transition: all 250ms ease; }
+#custom-ws1:hover, #custom-ws2:hover, #custom-ws3:hover, #custom-ws4:hover, #custom-ws5:hover { background: @surface; color: @fg; }
+#custom-ws1.active, #custom-ws2.active, #custom-ws3.active, #custom-ws4.active, #custom-ws5.active { background: @line; color: @bright; }

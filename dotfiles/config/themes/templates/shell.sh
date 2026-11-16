@@ -1,0 +1,4 @@
+export LS_COLORS='rs=0:di=1;38;2;{{FG_RGB}}:ln=38;2;{{DIM_RGB}}:ex=1;38;2;{{BRIGHT_RGB}}:pi=38;2;{{MUTED_RGB}}:so=38;2;{{MUTED_RGB}}:do=38;2;{{MUTED_RGB}}:bd=38;2;{{MUTED_RGB}}:cd=38;2;{{MUTED_RGB}}:or=38;2;{{MUTED_RGB}}:mi=38;2;{{MUTED_RGB}}:su=38;2;{{FG_RGB}}:sg=38;2;{{FG_RGB}}:tw=1;38;2;{{FG_RGB}}:ow=1;38;2;{{FG_RGB}}:st=1;38;2;{{FG_RGB}}:*.tar=38;2;{{MUTED_RGB}}:*.zip=38;2;{{MUTED_RGB}}:*.gz=38;2;{{MUTED_RGB}}:*.png=38;2;{{DIM_RGB}}:*.jpg=38;2;{{DIM_RGB}}:*.mp4=38;2;{{DIM_RGB}}'
+export GREP_COLORS='mt=1;38;2;{{BRIGHT_RGB}}:fn=38;2;{{DIM_RGB}}:ln=38;2;{{MUTED_RGB}}:se=38;2;{{FAINT_RGB}}'
+export FZF_DEFAULT_OPTS="--color=bg:#{{BG}},bg+:#{{SURFACE}},fg:#{{DIM}},fg+:#{{FG}},hl:#{{BRIGHT}},hl+:#{{BRIGHT}},info:#{{MUTED}},prompt:#{{FG}},pointer:#{{FG}},marker:#{{FG}},spinner:#{{DIM}},header:#{{MUTED}},border:#{{LINE}} --border=rounded"
+export BAT_THEME=ansi

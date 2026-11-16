@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# rice-check [--fix]: проверка всего райса; --fix чинит безопасное
+FIX=0; [ "$1" = "--fix" ] && FIX=1
+Q="$HOME/.config/quickshell"; H="$HOME/.config/hypr"; T="$HOME/.config/themes"
+W=0; F=0
+ok()   { printf ' [ ok ] %s\n' "$1"; }
+warn() { printf ' [warn] %s\n' "$1"; W=$((W + 1)); }
+bad()  { printf ' [FAIL] %s\n' "$1"; F=$((F + 1)); }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+echo "== Quickshell =="
+for f in shell.qml qmldir Theme.qml; do [ -f "$Q/$f" ] && ok "$f" || bad "нет $f"; done
+if [ -f "$Q/qmldir" ]; then
+  for f in "$Q"/*.qml; do
+    n=$(basename "$f" .qml); [ "$n" = shell ] && continue
+    if ! grep -qE "^(singleton )?$n " "$Q/qmldir"; then
+      if [ $FIX = 1 ]; then
+        if [ "$n" = Theme ]; then echo "singleton Theme 1.0 Theme.qml" >> "$Q/qmldir"; else echo "$n 1.0 $n.qml" >> "$Q/qmldir"; fi
+        ok "добавил $n в qmldir"
+      else bad "$n.qml не в qmldir (Quickshell напишет «$n is not a type»)"; fi
+    fi
+  done
+  if [ -n "$(sort "$Q/qmldir" | uniq -d)" ]; then
+    if [ $FIX = 1 ]; then awk '!s[$0]++' "$Q/qmldir" > "$Q/qmldir.tmp" && mv "$Q/qmldir.tmp" "$Q/qmldir"; ok "убрал повторы в qmldir"; else warn "повторы в qmldir"; fi
+  fi
+fi
+d=$(grep -o 'id: [A-Za-z0-9_]*' "$Q/shell.qml" 2>/dev/null | sort | uniq -d | tr '\n' ' ')
+[ -z "$d" ] && ok "в shell.qml нет повторяющихся id" || bad "повторяющиеся id в shell.qml: $d"
+for t in WFrame PawLayer NotesView Launcher; do grep -q "$t" "$Q/shell.qml" 2>/dev/null && ok "shell.qml использует $t" || warn "shell.qml не использует $t"; done
+for j in "$Q/widgets.json" "$Q/keybinds.json" "$Q/todo.json" "$T/colors.json" "$HOME/.local/share/quickshell-notes/boards.json"; do
+  [ -f "$j" ] || continue
+  if have python3; then python3 -m json.tool "$j" >/dev/null 2>&1 && ok "JSON ${j#$HOME/}" || bad "битый JSON: ${j#$HOME/}"; fi
+done
+
+echo "== Hyprland =="
+if [ -f "$H/monochrome.lua" ]; then
+  if [ $FIX = 1 ]; then
+    awk '/^hl\.(bind|layer_rule|animation|curve|env|monitor)\(/ { if (seen[$0]++) next } { print }' "$H/monochrome.lua" > /tmp/mono.dd && cp /tmp/mono.dd "$H/monochrome.lua"
+    sed -i '/^  hl.exec_cmd("waybar")$/d; /^  hl.exec_cmd("swaync")$/d; /^  hl.exec_cmd("hypridle")$/d; /^  hl.exec_cmd("quickshell")$/d; /^  hl.exec_cmd("env QT_QUICK_BACKEND=software quickshell")$/d' "$H/monochrome.lua"
+    ok "убрал одинаковые строки и прямые запуски служб в monochrome.lua"
+  fi
+  d=$(grep -ho '^hl\.bind([^,]*' "$H/hyprland.lua" "$H/monochrome.lua" 2>/dev/null | sed 's/mainMod/mod/' | sort | uniq -d | tr '\n' ' ')
+  [ -z "$d" ] && ok "двойных биндов нет" || bad "клавиши назначены дважды: $d"
+  n=$(grep -c 'rice up' "$H/monochrome.lua"); [ "$n" -le 1 ] && ok "rice up запускается $n раз" || bad "rice up запускается $n раз"
+  grep -qE 'exec_cmd\("(waybar|swaync|hypridle|quickshell|env QT_QUICK_BACKEND=software quickshell)"\)' "$H/monochrome.lua" && warn "есть прямые запуски служб рядом с rice up (будут двойники)"
+else bad "нет monochrome.lua"; fi
+if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || [ -d "${XDG_RUNTIME_DIR:-/nonexistent}/hypr" ]; then
+  [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t "$XDG_RUNTIME_DIR/hypr/" | head -n1)
+  e=$(hyprctl configerrors 2>&1 | head -3)
+  [ -z "$e" ] && ok "ошибок конфига Hyprland нет" || bad "ошибки конфига: $e"
+else warn "Hyprland не найден (запусти из foot внутри Hyprland, чтобы проверить конфиг)"; fi
+
+echo "== службы =="
+for s in quickshell waybar swaync; do
+  c=$(pgrep -cx "$s"); [ "$c" = 1 ] && ok "$s: 1 экземпляр" || { [ "$c" = 0 ] && warn "$s не запущен" || bad "$s запущен $c раза (двойники: rice stop $s; rice up $s)"; }
+done
+pgrep -f ws-daemon.sh >/dev/null && ok "демон рабочих столов" || warn "демон столов не запущен (rice up wsd)"
+
+echo "== скрипты и PATH =="
+for s in "$Q"/scripts/*.sh "$HOME"/.local/bin/*; do
+  [ -f "$s" ] || continue
+  [ -x "$s" ] && continue
+  if [ $FIX = 1 ]; then chmod +x "$s"; ok "chmod +x ${s#$HOME/}"; else warn "не исполняемый: ${s#$HOME/}"; fi
+done
+case ":$PATH:" in *":$HOME/.local/bin:"*) ok "~/.local/bin в PATH" ;; *) warn "~/.local/bin нет в PATH (theme и rice не найдутся)" ;; esac
+if [ -f "$HOME/mono.sh" ]; then
+  if [ $FIX = 1 ]; then mv "$HOME/mono.sh" "$HOME/mono.sh.СТАРЫЙ-НЕ-ЗАПУСКАТЬ"; ok "переименовал ~/mono.sh"; else bad "~/mono.sh лежит в домашней папке (он перезаписывает конфиги), запусти rice-check --fix"; fi
+fi
+
+echo "== темы =="
+cur=$(cat "$T/current" 2>/dev/null); [ -n "$cur" ] && ok "тема: $cur" || warn "тема не выбрана (theme gray)"
+if [ -n "$cur" ]; then
+  n=$(find "$T/wallpapers/$cur" -maxdepth 1 -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \) 2>/dev/null | wc -l)
+  [ "$n" -gt 0 ] && ok "обои темы: $n" || warn "в $T/wallpapers/$cur нет картинок"
+  if [ "$cur" = cat ]; then
+    grep -q '"paws": true' "$T/colors.json" 2>/dev/null && ok "лапки включены в colors.json" || bad "для темы cat в colors.json нет \"paws\": true (лапки не появятся)"
+  fi
+fi
+
+echo "== система =="
+rpm -q polkit >/dev/null 2>&1 && ok "polkit установлен" || warn "нет polkit: выключение и перезагрузка из панели могут не работать (sudo dnf install -y polkit)"
+systemctl is-active --quiet sshd 2>/dev/null && warn "SSH-сервер включён (если не нужен: sudo systemctl disable --now sshd)"
+fc-list 2>/dev/null | grep -qi 'JetBrains Mono' && ok "шрифт JetBrains Mono" || warn "нет шрифта JetBrains Mono (sudo dnf install -y jetbrains-mono-fonts)"
+for c in quickshell waybar swaync foot nmcli wpctl playerctl cava grim slurp wl-copy socat fuzzel; do have "$c" || warn "нет программы: $c"; done
+for c in btop fastfetch mousepad magick; do have "$c" || warn "необязательно, но нет: $c"; done
+
+echo
+echo "итог: предупреждений $W, ошибок $F"
+[ $FIX = 0 ] && [ $((W + F)) -gt 0 ] && echo "часть можно починить автоматически: rice-check --fix"
+exit $F

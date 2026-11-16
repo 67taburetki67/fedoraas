@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# supervise <имя> <команда...>: держит процесс живым, останавливается после 5 быстрых падений подряд
+name="$1"; shift
+RUN="${XDG_RUNTIME_DIR:-/tmp}"
+exec 8>"$RUN/supervise-$name.lock"
+flock -n 8 || exit 0
+log="$RUN/supervise-$name.log"
+fails=0
+while true; do
+  start=$(date +%s)
+  "$@" >>"$log" 2>&1 8>&-
+  code=$?
+  if [ $(( $(date +%s) - start )) -lt 10 ]; then fails=$((fails + 1)); else fails=0; fi
+  echo "$(date '+%F %T') $name завершился (код $code), перезапуск" >>"$log"
+  if [ "$fails" -ge 5 ]; then
+    echo "$(date '+%F %T') $name: слишком частые падения, остановлено" >>"$log"
+    command -v notify-send >/dev/null && notify-send "rice" "$name падает слишком часто, см. $log"
+    exit 1
+  fi
+  sleep 1
+done

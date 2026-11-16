@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+F="${XDG_RUNTIME_DIR:-/tmp}/perf-lite"
+lite() { hyprctl eval "hl.config({ decoration = { blur = { enabled = false }, shadow = { enabled = false } }, animations = { enabled = false } })" >/dev/null; touch "$F"; }
+full() { hyprctl eval "hl.config({ decoration = { blur = { enabled = true }, shadow = { enabled = true } }, animations = { enabled = true } })" >/dev/null; rm -f "$F"; }
+case "$1" in
+  lite) lite ;; full) full ;;
+  toggle) if [ -e "$F" ]; then full; else lite; fi ;;
+  *) echo "perf lite | full | toggle" ;;
+esac

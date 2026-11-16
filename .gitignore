@@ -1,0 +1,7 @@
+*.bak*
+*.tmp
+widgets.json
+todo.json
+notes.txt
+boards.json
+.DS_Store

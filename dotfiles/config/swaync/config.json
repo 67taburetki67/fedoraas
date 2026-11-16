@@ -1,0 +1,40 @@
+{
+  "positionX": "right",
+  "positionY": "top",
+  "control-center-margin-top": 10,
+  "control-center-margin-right": 10,
+  "control-center-margin-bottom": 10,
+  "control-center-width": 400,
+  "fit-to-screen": false,
+  "control-center-height": 720,
+  "notification-window-width": 380,
+  "timeout": 6,
+  "timeout-low": 4,
+  "timeout-critical": 0,
+  "transition-time": 200,
+  "image-visibility": "when-available",
+  "hide-on-action": true,
+  "text-empty": "Тишина",
+  "widgets": ["label", "buttons-grid", "volume", "backlight", "mpris", "title", "notifications"],
+  "widget-config": {
+    "label": { "text": "центр управления", "max-lines": 1 },
+    "buttons-grid": {
+      "buttons-per-row": 2,
+      "actions": [
+        { "label": "Wi-Fi", "type": "toggle", "active": true,
+          "command": "sh -c '[ \"$SWAYNC_TOGGLE_STATE\" = true ] && nmcli radio wifi on || nmcli radio wifi off'" },
+        { "label": "Bluetooth", "type": "toggle", "active": true,
+          "command": "sh -c '[ \"$SWAYNC_TOGGLE_STATE\" = true ] && bluetoothctl power on || bluetoothctl power off'" },
+        { "label": "Не беспокоить", "type": "toggle", "active": false,
+          "command": "swaync-client -d -sw" },
+        { "label": "Шейдер", "type": "toggle", "active": true,
+          "command": "sh -c '$HOME/.config/hypr/toggle-shader.sh'" }
+      ]
+    },
+    "volume": { "label": "vol" },
+    "backlight": { "label": "bri", "device": "intel_backlight" },
+    "mpris": { "image-size": 72, "image-radius": 14, "autohide": true },
+    "title": { "text": "Уведомления", "clear-all-button": true, "button-text": "Очистить" },
+    "notifications": { "vexpand": true }
+  }
+}

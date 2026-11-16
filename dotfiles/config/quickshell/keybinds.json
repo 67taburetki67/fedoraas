@@ -1,0 +1,38 @@
+[
+  { "title": "приложения", "items": [
+    { "keys": "SUPER + Q", "desc": "терминал" },
+    { "keys": "SUPER + B", "desc": "Firefox" },
+    { "keys": "SUPER + D", "desc": "лаунчер приложений" },
+    { "keys": "SUPER + R", "desc": "лаунчер (меню по умолчанию)" },
+    { "keys": "SUPER + E", "desc": "файловый менеджер" } ] },
+  { "title": "меню и оверлеи", "items": [
+    { "keys": "SUPER + W", "desc": "виджеты, темы, обои" },
+    { "keys": "SUPER + O", "desc": "заметки" },
+    { "keys": "SUPER + N", "desc": "быстрые настройки (Wi-Fi, звук)" },
+    { "keys": "SUPER + A", "desc": "плеер музыки" },
+    { "keys": "SUPER + /  или  F1", "desc": "эта шпаргалка" },
+    { "keys": "Esc", "desc": "закрыть любой оверлей" } ] },
+  { "title": "окна", "items": [
+    { "keys": "SUPER + C", "desc": "закрыть окно" },
+    { "keys": "SUPER + V", "desc": "плавающее или тайловое" },
+    { "keys": "SUPER + F", "desc": "во весь экран" },
+    { "keys": "SUPER + стрелки", "desc": "перейти фокусом" },
+    { "keys": "SUPER + SHIFT + стрелки", "desc": "подвинуть окно" },
+    { "keys": "SUPER + ЛКМ (тащить)", "desc": "переместить окно мышью" },
+    { "keys": "SUPER + ПКМ (тащить)", "desc": "изменить размер мышью" } ] },
+  { "title": "рабочие столы", "items": [
+    { "keys": "SUPER + 1…0", "desc": "перейти на стол" },
+    { "keys": "SUPER + SHIFT + 1…0", "desc": "перенести окно на стол" },
+    { "keys": "SUPER + колесо мыши", "desc": "листать столы" },
+    { "keys": "SUPER + S", "desc": "скрытый стол (показать/спрятать)" },
+    { "keys": "SUPER + SHIFT + S", "desc": "отправить окно в скрытый стол" } ] },
+  { "title": "система", "items": [
+    { "keys": "Print", "desc": "снимок области в буфер" },
+    { "keys": "SUPER + Print", "desc": "снимок всего экрана" },
+    { "keys": "SUPER + SHIFT + Print", "desc": "область с разметкой" },
+    { "keys": "SUPER + CTRL + S", "desc": "снимок области (запасной)" },
+    { "keys": "SUPER + SHIFT + V", "desc": "история буфера обмена" },
+    { "keys": "SUPER + SHIFT + P", "desc": "лёгкий режим: без блюра, теней и анимаций" },
+    { "keys": "SUPER + M", "desc": "выйти из Hyprland" },
+    { "keys": "клавиши громкости и яркости", "desc": "с плашкой на экране" } ] }
+]

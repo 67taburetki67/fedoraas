@@ -1,0 +1,16 @@
+@define-color window_bg_color #{{BG}};
+@define-color window_fg_color #{{FG}};
+@define-color view_bg_color #{{BG2}};
+@define-color view_fg_color #{{FG}};
+@define-color headerbar_bg_color #{{SURFACE}};
+@define-color headerbar_fg_color #{{FG}};
+@define-color headerbar_border_color #{{LINE}};
+@define-color card_bg_color #{{SURFACE}};
+@define-color card_fg_color #{{FG}};
+@define-color popover_bg_color #{{SURFACE}};
+@define-color popover_fg_color #{{FG}};
+@define-color dialog_bg_color #{{SURFACE}};
+@define-color sidebar_bg_color #{{BG2}};
+@define-color accent_bg_color #{{DIM}};
+@define-color accent_fg_color #{{BG}};
+@define-color accent_color #{{FG}};

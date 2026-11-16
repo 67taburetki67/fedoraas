@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+T="$HOME/.config/themes"
+mkdir -p "$T"; exec 9>"$T/.lock"; flock -w 15 9 || { echo "theme уже выполняется" >&2; exit 1; }
+H="$HOME/.config"
+VARS=(BG BG2 SURFACE SURFACE2 LINE FAINT MUTED DIM FG BRIGHT ACCENT C0 C1 C2 C3 C4 C5 C6 C7 C8 C9 C10 C11 C12 C13 C14 C15 TINT SAT GRAIN FG_RGB BRIGHT_RGB DIM_RGB MUTED_RGB FAINT_RGB LOCKBG)
+
+list() { local f; for f in "$T"/themes/*.env; do [ -e "$f" ] && basename "$f" .env; done; }
+current() { cat "$T/current" 2>/dev/null || echo gray; }
+rgb() { printf '%d;%d;%d' "0x${1:0:2}" "0x${1:2:2}" "0x${1:4:2}"; }
+
+set_wall() {
+  local mode="$1" dir files=() f cur i n pick="" old
+  dir="$T/wallpapers/$(current)"
+  mapfile -t files < <(find "$dir" -maxdepth 1 -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \) 2>/dev/null | sort)
+  n=${#files[@]}
+  if [ "$n" -eq 0 ]; then
+    echo "в $dir нет картинок: положи туда обои под эту тему" >&2
+    rm -f "$T/current-wall"
+    return 1
+  fi
+  cur=$(cat "$T/current-wall" 2>/dev/null)
+  case "$mode" in
+    keep) for f in "${files[@]}"; do [ "$f" = "$cur" ] && pick="$f"; done ;;
+    next) for i in "${!files[@]}"; do [ "${files[$i]}" = "$cur" ] && pick="${files[$(( (i + 1) % n ))]}"; done ;;
+  esac
+  [ -n "$pick" ] || pick="${files[$((RANDOM % n))]}"
+  printf '%s' "$pick" > "$T/current-wall"
+  old=$(pgrep -x swaybg)
+  setsid -f swaybg -i "$pick" -m fill >/dev/null 2>&1 9>&-
+  if [ -n "$old" ]; then sleep 0.4; kill $old 2>/dev/null; fi
+}
+
+render() {
+  local tpl="$T/templates/$1" dest="$2"
+  [ -f "$tpl" ] || return 0
+  mkdir -p "$(dirname "$dest")"
+  if [ -f "$dest" ] && [ ! -f "$dest.theme-bak" ]; then cp "$dest" "$dest.theme-bak"; fi
+  sed "${SEDARGS[@]}" "$tpl" > "$dest"
+}
+
+apply() {
+  local name="$1" wallmode="${2:-random}" full="${3:-1}" f="$T/themes/$1.env" v wall
+  if [ ! -f "$f" ]; then echo "нет темы «$name». Есть: $(list | tr '\n' ' ')" >&2; return 1; fi
+  set -a; . "$f"; set +a
+  : "${GRAIN:=0.04}" "${SAT:=0.0}" "${TINT:=1.0, 1.0, 1.0}" "${ACCENT:=$FG}"
+  echo "$name" > "$T/current"
+  FG_RGB=$(rgb "$FG"); BRIGHT_RGB=$(rgb "$BRIGHT"); DIM_RGB=$(rgb "$DIM"); MUTED_RGB=$(rgb "$MUTED"); FAINT_RGB=$(rgb "$FAINT")
+  set_wall "$wallmode"
+  wall=$(cat "$T/current-wall" 2>/dev/null)
+  if [ -n "$wall" ] && [ -f "$wall" ]; then LOCKBG="path = $wall"; else LOCKBG="color = rgba(${BG}ff)"; fi
+  SEDARGS=()
+  for v in "${VARS[@]}"; do SEDARGS+=(-e "s|{{$v}}|${!v:-}|g"); done
+
+  render waybar-style.css  "$H/waybar/style.css"
+  render swaync-style.css  "$H/swaync/style.css"
+  render fuzzel.ini        "$H/fuzzel/fuzzel.ini"
+  render foot.ini          "$H/foot/foot.ini"
+  render kitty-mono.conf   "$H/kitty/mono.conf"
+  render hyprlock.conf     "$H/hypr/hyprlock.conf"
+  render hypr-theme.lua    "$H/hypr/theme.lua"
+  render grain.frag        "$H/hypr/shaders/grain.frag"
+  render gtk.css           "$H/gtk-3.0/gtk.css"
+  render gtk.css           "$H/gtk-4.0/gtk.css"
+  render qt6ct-colors.conf "$H/qt6ct/colors/mono.conf"
+  render starship.toml     "$H/starship.toml"
+  render btop.theme        "$H/btop/themes/mono.theme"
+  render shell.sh          "$T/shell.sh"
+
+  cat > "$T/colors.json" <<JSON
+{ "bg": "#$BG", "bg2": "#$BG2", "surface": "#$SURFACE", "surface2": "#$SURFACE2", "line": "#$LINE", "faint": "#$FAINT", "muted": "#$MUTED", "dim": "#$DIM", "fg": "#$FG", "bright": "#$BRIGHT", "paws": ${PAWS:-false} }
+JSON
+[ "${PAWS:-false}" = true ] && sed -i 's/ }$/, "paws": true }/' "$T/colors.json"
+
+  [ -f "$H/btop/btop.conf" ] && sed -i 's|^color_theme = .*|color_theme = "mono"|' "$H/btop/btop.conf"
+
+  if [ "$full" = "1" ]; then
+    if command -v hyprctl >/dev/null 2>&1 && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+      hyprctl reload >/dev/null 2>&1
+      if [ ! -e "${XDG_RUNTIME_DIR:-/tmp}/shader-off" ]; then
+        sleep 0.3
+        hyprctl eval "hl.config({ decoration = { screen_shader = '' } })" >/dev/null 2>&1
+        sleep 0.2
+        hyprctl eval "hl.config({ decoration = { screen_shader = '$H/hypr/shaders/grain.frag' } })" >/dev/null 2>&1
+      fi
+    fi
+    pkill -SIGUSR2 -x waybar 2>/dev/null
+    command -v swaync-client >/dev/null && swaync-client -rs >/dev/null 2>&1
+  fi
+  echo "тема: $name"
+}
+
+case "${1:-}" in
+  list) list ;;
+  current) current ;;
+  wall)
+    case "${2:-random}" in
+      apply) set_wall keep ;;
+      next) apply "$(current)" next 0 ;;
+      random) apply "$(current)" random 0 ;;
+    esac ;;
+  "") echo "использование: theme <имя> | theme list | theme current | theme wall next|random"; list ;;
+  *) apply "$1" random 1 ;;
+esac

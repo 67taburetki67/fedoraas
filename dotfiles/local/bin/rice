@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+RUN="${XDG_RUNTIME_DIR:-/tmp}"
+SUP="$HOME/.local/bin/supervise"
+start() { local name="$1"; shift; setsid -f "$SUP" "$name" "$@" >/dev/null 2>&1; }
+up() {
+  case "$1" in
+    quickshell)
+      if systemd-detect-virt -q 2>/dev/null; then start quickshell env QT_QUICK_BACKEND=software quickshell
+      else start quickshell quickshell; fi ;;
+    waybar)   start waybar waybar ;;
+    swaync)   start swaync swaync ;;
+    hypridle) command -v hypridle >/dev/null 2>&1 && start hypridle hypridle ;;
+    wsd)      start wsd "$HOME/.config/waybar/ws-daemon.sh" ;;
+  esac
+}
+ALL="wsd waybar swaync quickshell hypridle"
+chk() { if command -v "$1" >/dev/null 2>&1; then printf '  %-20s ok\n' "$1"; else printf '  %-20s НЕТ\n' "$1"; fi; }
+case "$1" in
+  up) for n in ${2:-$ALL}; do up "$n"; done ;;
+  restart)
+    shift
+    for n in ${@:-quickshell waybar swaync}; do
+      if [ "$n" = "wsd" ]; then pkill -f ws-daemon.sh 2>/dev/null; else pkill -x "$n" 2>/dev/null; fi
+      sleep 0.3; up "$n"
+    done ;;
+  stop)
+    for n in ${2:-$ALL}; do pkill -f "supervise $n" 2>/dev/null; if [ "$n" = "wsd" ]; then pkill -f ws-daemon.sh; else pkill -x "$n"; fi; done ;;
+  status)
+    for n in quickshell waybar swaync hypridle; do
+      if pgrep -x "$n" >/dev/null; then printf '%-12s работает (pid %s)\n' "$n" "$(pgrep -x "$n" | head -1)"; else printf '%-12s НЕ запущен\n' "$n"; fi
+    done
+    if pgrep -f ws-daemon.sh >/dev/null; then echo "wsd          работает"; else echo "wsd          НЕ запущен"; fi
+    echo; echo "последние события надзора:"; tail -qn 2 "$RUN"/supervise-*.log 2>/dev/null ;;
+  logs) tail -n 40 "$RUN/supervise-${2:-quickshell}.log" ;;
+  doctor)
+    echo "программы:"
+    for c in hyprland hyprctl quickshell waybar swaync swaync-client foot fuzzel nmcli bluetoothctl wpctl pactl brightnessctl powerprofilesctl playerctl cava grim slurp wl-copy cliphist hyprlock hypridle hyprsunset socat pw-record notify-send magick; do chk "$c"; done
+    echo; echo "файлы:"
+    for f in .config/quickshell/shell.qml .config/quickshell/qmldir .config/quickshell/Theme.qml .config/themes/colors.json .config/hypr/monochrome.lua; do
+      if [ -f "$HOME/$f" ]; then printf '  %-45s ok\n' "$f"; else printf '  %-45s НЕТ\n' "$f"; fi
+    done
+    echo; echo "ошибки конфига Hyprland:"; hyprctl configerrors 2>&1 | head -5
+    echo; "$0" status ;;
+  *) echo "rice up | restart [имя] | stop [имя] | status | logs [имя] | doctor" ;;
+esac

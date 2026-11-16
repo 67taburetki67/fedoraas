@@ -4,7 +4,10 @@
 
 > Статус: бета. Проверено в виртуальной машине на Fedora 44. На реальном железе, особенно с гибридной графикой NVIDIA, не проверялось. Экран блокировки по умолчанию отключён.
 
-## Установка (Fedora 43+)
+## Известные баги
+Неработающий запуск на Fedora 45 из-за kmscon (Временный фикс - kmscon-launch-gui start-hyprland)
+Бесконечное создание обоев из-за swaync-client -rs которое вызывалось theme gray временный фикс - pkill swaync-client из второй консоли
+## Установка (Fedora 44+)
 
 ```bash
 git clone https://github.com/67taburetki67/fedoraas.git rice && cd rice

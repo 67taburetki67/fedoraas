@@ -9,6 +9,7 @@ ShellRoot {
   property bool shown: false
   property bool editing: false
   property bool picking: false
+  property bool panelTop: false
   property int cpu: 0
   property int mem: 0
   property int temp: 0
@@ -69,7 +70,7 @@ ShellRoot {
       todo:     { on: true, x: 0.03, y: 0.62, w: 0.16, h: 0.28, a: 1.0, bg: 0.6 },
       notes:    { on: true, x: 0.80, y: 0.66, w: 0.17, h: 0.24, a: 1.0, bg: 0.6 },
       apps:     { on: true, x: 0.38, y: 0.64, w: 0.24, h: 0.13, a: 1.0, bg: 0.6 },
-      info:     { on: true, x: 0.42, y: 0.82, w: 0.16, h: 0.13, a: 1.0, bg: 0.6 },
+      info:     { on: true, x: 0.21, y: 0.62, w: 0.14, h: 0.13, a: 1.0, bg: 0.6 },
       themes:   { on: true, x: 0.51, y: 0.43, w: 0.20, h: 0.21, a: 1.0, bg: 0.6 }
     },
     stickers: ({}),
@@ -77,26 +78,76 @@ ShellRoot {
   })
   property var cfg: JSON.parse(JSON.stringify(defaults))
 
+  // ---- проверка widgets.json: типы, диапазоны, поддерживаемая версия, безопасные значения по умолчанию ----
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function num(v, lo, hi, d) {
+    const n = (typeof v === "number") ? v : NaN;
+    return isFinite(n) ? clamp(n, lo, hi) : d;
+  }
+  function cleanGeom(g, d) {
+    const src = (g && typeof g === "object") ? g : {};
+    const o = Object.assign({}, d);
+    o.w = num(src.w, 0.05, 1, d.w);
+    o.h = num(src.h, 0.05, 1, d.h);
+    // x+w <= 1 и y+h <= 1: карточка не уходит за экран
+    o.x = num(src.x, 0, 1 - o.w, Math.min(d.x, 1 - o.w));
+    o.y = num(src.y, 0, 1 - o.h, Math.min(d.y, 1 - o.h));
+    o.a = num(src.a, 0.2, 1, d.a !== undefined ? d.a : 1);
+    if (d.bg !== undefined) o.bg = num(src.bg, 0, 1, d.bg);
+    if (d.on !== undefined) o.on = (typeof src.on === "boolean") ? src.on : d.on;
+    return o;
+  }
   function applyConfig(txt) {
-    try {
-      const c = JSON.parse(txt);
-      const base = JSON.parse(JSON.stringify(defaults));
-      if (c.settings) Object.assign(base.settings, c.settings);
-      if (c.version === 2 && c.widgets) {
-        for (const k in c.widgets) if (base.widgets[k]) base.widgets[k] = Object.assign({}, base.widgets[k], c.widgets[k]);
+    let c;
+    try { c = JSON.parse(txt); } catch (e) {
+      console.log("widgets.json: " + e + " (используются настройки по умолчанию, копия файла: widgets.json.broken)");
+      cfgBackup.command = ["sh", "-c", 'cp -f -- "$1" "$1.broken"', "_", cfgFile.path];
+      cfgBackup.running = true;
+      return;
+    }
+    if (!c || typeof c !== "object" || Array.isArray(c)) { console.log("widgets.json: ожидался объект"); return; }
+    if (c.version !== undefined && c.version !== 2) console.log("widgets.json: версия " + c.version + " не поддерживается, раскладка сброшена");
+    const base = JSON.parse(JSON.stringify(defaults));
+    const st = (c.settings && typeof c.settings === "object") ? c.settings : {};
+    base.settings.city = (typeof st.city === "string") ? st.city.trim().slice(0, 64) : "";
+    base.settings.dim = num(st.dim, 0, 1, defaults.settings.dim);
+    base.settings.hideWindows = (typeof st.hideWindows === "boolean") ? st.hideWindows : defaults.settings.hideWindows;
+    if (c.version === 2) {
+      if (c.widgets && typeof c.widgets === "object")
+        for (const k in base.widgets) if (c.widgets[k]) base.widgets[k] = cleanGeom(c.widgets[k], defaults.widgets[k]);
+      if (c.stickers && typeof c.stickers === "object") {
+        const sd = { x: 0.42, y: 0.30, w: 0.16, h: 0.22, a: 1.0 };
+        for (const id in c.stickers) {
+          const sk = c.stickers[id];
+          if (!sk || typeof sk.path !== "string" || sk.path === "") continue;
+          const g = cleanGeom(sk, sd);
+          g.path = sk.path;
+          g.type = (sk.type === "gif") ? "gif" : "image";
+          base.stickers[id] = g;
+        }
       }
-      if (c.version === 2 && c.stickers) base.stickers = c.stickers;
-      if (c.apps) base.apps = c.apps;
-      cfg = base;
-      stickerIds = Object.keys(base.stickers);
-    } catch (e) { console.log("widgets.json: " + e); }
+    }
+    if (Array.isArray(c.apps)) {
+      const apps = c.apps.filter(a => a && typeof a.name === "string" && typeof a.cmd === "string" && a.name !== "" && a.cmd !== "").slice(0, 40);
+      if (apps.length) base.apps = apps.map(a => ({ name: a.name, cmd: a.cmd }));
+    }
+    cfg = base;
+    stickerIds = Object.keys(base.stickers);
   }
   function saveConfig() { cfgFile.setText(JSON.stringify(cfg, null, 2)); }
   function setGeom(kind, id, prop, val) {
+    if (typeof val !== "number" || !isFinite(val)) return;
     const c = JSON.parse(JSON.stringify(cfg));
     const t = kind === "s" ? c.stickers[id] : c.widgets[id];
     if (!t) return;
-    t[prop] = val;
+    // размеры и позиция ограничиваются совместно: x+w <= 1, y+h <= 1
+    if (prop === "w") t.w = clamp(val, 0.05, Math.max(0.05, 1 - t.x));
+    else if (prop === "h") t.h = clamp(val, 0.05, Math.max(0.05, 1 - t.y));
+    else if (prop === "x") t.x = clamp(val, 0, Math.max(0, 1 - t.w));
+    else if (prop === "y") t.y = clamp(val, 0, Math.max(0, 1 - t.h));
+    else if (prop === "a") t.a = clamp(val, 0.2, 1);
+    else if (prop === "bg") t.bg = clamp(val, 0, 1);
+    else t[prop] = val;
     cfg = c;
   }
   function setWidgetOn(key, on) {
@@ -276,6 +327,7 @@ ShellRoot {
   }
 
   Process { id: pAct }
+  Process { id: cfgBackup }
   Process { id: launchAct }
   Process { id: notifyAct }
   Process {
@@ -398,7 +450,7 @@ ShellRoot {
   Timer { interval: 5000; running: root.shown; repeat: true; triggeredOnStart: true; onTriggered: { if (!infoProc.running) infoProc.running = true; } }
   Timer { interval: 1500; running: root.shown; repeat: true; triggeredOnStart: true; onTriggered: root.refreshPlayer() }
   Timer { interval: 250; running: root.shown && root.pStatus === "Playing"; repeat: true; onTriggered: root.pPos = root.pLen > 0 ? Math.min(root.pLen, root.pPos + 0.25) : root.pPos + 0.25 }
-  Timer { interval: 900000; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.refreshWeather() }
+  Timer { interval: 900000; running: root.cfg.widgets.weather.on; repeat: true; triggeredOnStart: true; onTriggered: root.refreshWeather() }
   Timer { interval: 1000; running: root.pmRunning; repeat: true; onTriggered: root.pmTick() }
 
   PanelWindow {
@@ -482,8 +534,9 @@ ShellRoot {
         visible: root.editing
         bgA: 0.93
         anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 40
+        // положение задаётся через y, а не через якоря: сброс якорей на лету в Qt не срабатывает,
+        // и панель растягивалась между верхом и низом экрана
+        y: root.panelTop ? 72 : parent.height - height - 40
         width: Math.min(parent.width - 60, 980)
         height: ed.implicitHeight + 36
         Column {
@@ -565,6 +618,7 @@ ShellRoot {
           Flow {
             width: parent.width
             spacing: 8
+            WPill { label: root.panelTop ? "панель: вверху" : "панель: внизу"; onClicked: root.panelTop = !root.panelTop }
             WPill { label: "сбросить раскладку"; onClicked: root.resetLayout() }
             WPill { label: "перечитать файл"; onClicked: cfgFile.reload() }
           }

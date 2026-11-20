@@ -10,7 +10,9 @@ case "$1" in
       grim -g "$geo" - | satty --filename - --output-filename "$f" --copy-command wl-copy
       exit 0
     else
+      # редактора нет: сохраняем обычный снимок и говорим об этом, а не молчим
       grim -g "$geo" "$f"
+      command -v notify-send >/dev/null && notify-send "Скриншот без разметки" "satty не установлен (sudo dnf install -y satty), сохранён обычный снимок"
     fi ;;
 esac
 if [ -f "$f" ]; then

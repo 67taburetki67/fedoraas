@@ -20,7 +20,6 @@ Scope {
   property int bri: -1
   property string profile: "none"
   property bool airplane: false
-  property bool shaderOn: true
   property bool dndOn: false
   property int wsig: 0
   property string wrate: ""
@@ -40,12 +39,10 @@ Scope {
   property int briTarget: 0
   property int briSent: -1
   property var queue: []
+  property bool actTimedOut: false
   function openNotifs() {
     shown = false;
     run(["sh", "-c", "sleep 0.4; swaync-client -op -sw || swaync-client -t -sw"]);
-  }
-  function toggleShader() {
-    run(["bash", Quickshell.env("HOME") + "/.config/hypr/toggle-shader.sh"]);
   }
   function fmtSpeed(b) {
     if (b >= 1048576) return (b / 1048576).toFixed(1) + " MB/s";
@@ -63,7 +60,7 @@ Scope {
   readonly property var profileNames: ({ "power-saver": "экономия", "balanced": "баланс", "performance": "мощность", "none": "нет данных" })
 
   onShownChanged: {
-    if (!shown) { page = "main"; askSsid = ""; confirm = ""; msg = ""; }
+    if (!shown) { page = "main"; askSsid = ""; confirm = ""; msg = ""; pwIn.text = ""; }
   }
   onMsgChanged: { if (msg !== "") msgTimer.restart() }
 
@@ -77,16 +74,20 @@ Scope {
     else if (p === "bt") loadBt();
     else if (p === "audio") loadAudio();
   }
-  function run(cmd, note) {
-    queue.push({ cmd: cmd, note: note || "" });
+  // env: переменные окружения только для этой команды (так передаём пароль, а не через аргументы)
+  function run(cmd, note, env) {
+    queue.push({ cmd: cmd, note: note || "", env: env || ({}) });
     pump();
   }
   function pump() {
     if (act.running || queue.length === 0) return;
     const it = queue.shift();
     msg = it.note;
+    act.environment = it.env;
     act.command = it.cmd;
+    actTimedOut = false;
     act.running = true;
+    actWatch.restart();
   }
   function setVol(v) { volTarget = Math.round(v * 100); if (!volAct.running) applyVol(); }
   function applyVol() {
@@ -101,8 +102,22 @@ Scope {
     briAct.running = true;
   }
   function connectWifi(name, pw) {
-    run(["nmcli", "dev", "wifi", "connect", name].concat(pw ? ["password", pw] : []), "подключаю " + name + "…");
+    const note = "подключаю " + name + "…";
+    const net = nets.find(n => n.ssid === name);
+    if (pw) {
+      // пароль уходит через окружение и stdin, а не через аргументы (аргументы видны всем в ps и /proc)
+      run(["sh", "-c", 'printf "%s\\n" "$QS_WIFI_PW" | nmcli --ask dev wifi connect "$QS_WIFI_SSID"'], note, { QS_WIFI_PW: pw, QS_WIFI_SSID: name });
+    } else if (net && net.uuid) {
+      // сохранённая сеть: поднимаем профиль по uuid (имя профиля может не совпадать с SSID)
+      run(["nmcli", "connection", "up", "uuid", net.uuid], note);
+    } else {
+      run(["nmcli", "dev", "wifi", "connect", name], note);
+    }
     askSsid = "";
+    pwIn.text = "";
+  }
+  function disconnectWifi() {
+    run(["sh", "-c", "dev=$(nmcli -t -f DEVICE,TYPE dev | awk -F: '$2==\"wifi\"{print $1; exit}'); [ -n \"$dev\" ] && nmcli dev disconnect \"$dev\"" ], "отключаю…");
   }
   function cycleProfile() {
     const i = profiles.indexOf(profile);
@@ -127,13 +142,21 @@ Scope {
   }
   Timer { id: confirmTimer; interval: 3000; onTriggered: qk.confirm = "" }
   Timer { id: msgTimer; interval: 6000; onTriggered: qk.msg = "" }
+  // команды не должны зависать навсегда и блокировать очередь
+  Timer { id: actWatch; interval: 45000; onTriggered: { if (act.running) { qk.actTimedOut = true; act.running = false; } } }
 
   Process {
     id: act
     stdout: StdioCollector { id: actOut }
     stderr: StdioCollector { id: actErr }
-    onExited: {
-      qk.msg = (actOut.text + actErr.text).trim().split("\n")[0];
+    onExited: (code, status) => {
+      actWatch.stop();
+      const out = actOut.text.trim();
+      const err = actErr.text.trim();
+      let m = (code === 0 ? (out || err) : (err || out)).split("\n")[0];
+      if (qk.actTimedOut) m = "команда не ответила за 45 секунд";
+      else if (code !== 0) m = "ошибка (код " + code + ")" + (m !== "" ? ": " + m : "");
+      qk.msg = m;
       qk.refresh();
       if (qk.page === "wifi") qk.loadWifi();
       if (qk.page === "bt") qk.loadBt();
@@ -170,7 +193,6 @@ Scope {
         qk.bri = isNaN(b) ? -1 : b;
         qk.profile = m.profile || "none";
         qk.airplane = m.airplane === "yes";
-        qk.shaderOn = m.shader !== "off";
         qk.dndOn = m.dnd === "true";
         qk.wsig = parseInt(m.wsig) || 0;
         qk.wrate = m.wrate || "";
@@ -192,14 +214,18 @@ Scope {
     command: ["bash", qk.scripts + "/wifi.sh"]
     stdout: StdioCollector {
       onStreamFinished: {
-        const saved = [];
-        const nets = {};
+        const saved = Object.create(null);
+        const nets = Object.create(null);
         let sec = "";
         text.split("\n").forEach(l => {
           if (l === "##saved") { sec = "s"; return; }
           if (l === "##nets") { sec = "n"; return; }
           if (!l) return;
-          if (sec === "s") { saved.push(l); return; }
+          if (sec === "s") {
+            const f = l.split("\t");
+            if (f.length >= 2 && f[1]) saved[f[1]] = f[0];
+            return;
+          }
           const p = l.split(":");
           if (p.length < 4) return;
           const inuse = p[0] === "*";
@@ -209,7 +235,7 @@ Scope {
           if (!name) return;
           const cur = nets[name];
           if (!cur || signal > cur.signal || inuse) {
-            nets[name] = { ssid: name, signal: signal, sec: security, inuse: inuse || (cur ? cur.inuse : false), saved: saved.indexOf(name) >= 0 };
+            nets[name] = { ssid: name, signal: signal, sec: security, inuse: inuse || (cur ? cur.inuse : false), saved: saved[name] !== undefined, uuid: saved[name] || "" };
           }
         });
         const arr = Object.keys(nets).map(k => nets[k]);
@@ -495,12 +521,6 @@ Scope {
               onToggled: qk.run(["rfkill", qk.airplane ? "unblock" : "block", "all"])
             }
             Tile {
-              title: "Шейдер"
-              sub: qk.shaderOn ? "включён" : "выключен"
-              active: qk.shaderOn
-              onToggled: qk.toggleShader()
-            }
-            Tile {
               title: "Не беспокоить"
               sub: qk.dndOn ? "включено" : "выключено"
               active: qk.dndOn
@@ -560,7 +580,7 @@ Scope {
               rtext: modelData.inuse ? "подключено" : (modelData.signal + "%" + (modelData.sec ? " · " + modelData.sec : ""))
               active: modelData.inuse
               onClicked: {
-                if (modelData.inuse) qk.run(["nmcli", "connection", "down", "id", modelData.ssid], "отключаю…");
+                if (modelData.inuse) qk.disconnectWifi();
                 else if (modelData.saved || modelData.sec === "") qk.connectWifi(modelData.ssid, "");
                 else qk.askSsid = modelData.ssid;
               }
@@ -743,7 +763,7 @@ Scope {
           Flow {
             width: parent.width
             spacing: 8
-            Pill { label: "заблокировать"; onClicked: { qk.shown = false; qk.run(["sh", "-c", "setsid -f hyprlock"]); } }
+            Pill { label: "заблокировать"; onClicked: { qk.shown = false; qk.run(["sh", "-c", "command -v hyprlock >/dev/null 2>&1 && setsid -f hyprlock || notify-send 'Экран блокировки' 'hyprlock не установлен: ./install.sh --with-lock'"]); } }
             Pill { label: "сон"; onClicked: { qk.shown = false; qk.run(["systemctl", "suspend"]); } }
             Pill { label: "выйти"; onClicked: qk.run(["hyprctl", "dispatch", "hl.dsp.exit()"]) }
             Pill { label: qk.confirm === "reboot" ? "точно?" : "перезагрузка"; active: qk.confirm === "reboot"; onClicked: qk.confirmed("reboot", ["systemctl", "reboot"]) }

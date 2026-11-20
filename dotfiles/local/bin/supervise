@@ -1,21 +1,54 @@
 #!/usr/bin/env bash
-# supervise <имя> <команда...>: держит процесс живым, останавливается после 5 быстрых падений подряд
+# supervise <имя> <команда...>: держит процесс живым и сам перезапускает его, если он упал.
+# Никогда не сдаётся: при частых падениях просто делает паузу подольше (30 с) и пробует снова.
+# По TERM/INT/HUP останавливает дочерний процесс и выходит (pid лежит в supervise-<имя>.pid).
 name="$1"; shift
 RUN="${XDG_RUNTIME_DIR:-/tmp}"
 exec 8>"$RUN/supervise-$name.lock"
 flock -n 8 || exit 0
+pidfile="$RUN/supervise-$name.pid"
 log="$RUN/supervise-$name.log"
-fails=0
-while true; do
+echo $$ > "$pidfile"
+child=""; stop=0; fails=0; warned=0
+
+on_term() { stop=1; [ -n "$child" ] && kill -TERM "$child" 2>/dev/null; }
+trap on_term TERM INT HUP
+trap 'rm -f "$pidfile"' EXIT
+
+# лог живёт в памяти (XDG_RUNTIME_DIR): при перезапуске оставляем только хвост
+rotate_log() {
+  local size
+  size=$(stat -c %s "$log" 2>/dev/null || echo 0)
+  if [ "$size" -gt 1048576 ]; then
+    tail -c 262144 "$log" > "$log.tmp" 2>/dev/null && mv -f "$log.tmp" "$log"
+  fi
+}
+
+while [ "$stop" = 0 ]; do
+  rotate_log
   start=$(date +%s)
-  "$@" >>"$log" 2>&1 8>&-
+  "$@" >>"$log" 2>&1 8>&- &
+  child=$!
+  wait "$child"
   code=$?
+  if [ "$stop" = 1 ]; then
+    # сигнал прервал wait: ждём настоящего завершения ребёнка, при необходимости добиваем
+    for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$child" 2>/dev/null || break; sleep 0.5; done
+    kill -KILL "$child" 2>/dev/null
+    wait "$child" 2>/dev/null
+    echo "$(date '+%F %T') $name остановлен" >>"$log"
+    break
+  fi
   if [ $(( $(date +%s) - start )) -lt 10 ]; then fails=$((fails + 1)); else fails=0; fi
   echo "$(date '+%F %T') $name завершился (код $code), перезапуск" >>"$log"
   if [ "$fails" -ge 5 ]; then
-    echo "$(date '+%F %T') $name: слишком частые падения, остановлено" >>"$log"
-    command -v notify-send >/dev/null && notify-send "rice" "$name падает слишком часто, см. $log"
-    exit 1
+    if [ "$warned" = 0 ]; then
+      warned=1
+      command -v notify-send >/dev/null && notify-send "rice" "$name падает слишком часто, пробую снова каждые 30 с (лог: $log)"
+    fi
+    sleep 30
+  else
+    warned=0
+    sleep 1
   fi
-  sleep 1
 done

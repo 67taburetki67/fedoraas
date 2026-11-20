@@ -26,9 +26,7 @@
         { "label": "Bluetooth", "type": "toggle", "active": true,
           "command": "sh -c '[ \"$SWAYNC_TOGGLE_STATE\" = true ] && bluetoothctl power on || bluetoothctl power off'" },
         { "label": "Не беспокоить", "type": "toggle", "active": false,
-          "command": "swaync-client -d -sw" },
-        { "label": "Шейдер", "type": "toggle", "active": true,
-          "command": "sh -c '$HOME/.config/hypr/toggle-shader.sh'" }
+          "command": "swaync-client -d -sw" }
       ]
     },
     "volume": { "label": "vol" },

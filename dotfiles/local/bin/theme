@@ -1,90 +1,190 @@
 #!/usr/bin/env bash
+# theme <имя> | list | current | wall next|random|apply
+# Тема применяется «всё или ничего»: сначала всё готовится во временной папке, и только потом файлы заменяются.
 T="$HOME/.config/themes"
-mkdir -p "$T"; exec 9>"$T/.lock"; flock -w 15 9 || { echo "theme уже выполняется" >&2; exit 1; }
 H="$HOME/.config"
-VARS=(BG BG2 SURFACE SURFACE2 LINE FAINT MUTED DIM FG BRIGHT ACCENT C0 C1 C2 C3 C4 C5 C6 C7 C8 C9 C10 C11 C12 C13 C14 C15 TINT SAT GRAIN FG_RGB BRIGHT_RGB DIM_RGB MUTED_RGB FAINT_RGB LOCKBG)
+mkdir -p "$T"; exec 9>"$T/.lock"; flock -w 15 9 || { echo "theme уже выполняется" >&2; exit 1; }
+
+NAME_RE='^[A-Za-z0-9_-]+$'
+COLOR_VARS=(BG BG2 SURFACE SURFACE2 LINE FAINT MUTED DIM FG BRIGHT ACCENT C0 C1 C2 C3 C4 C5 C6 C7 C8 C9 C10 C11 C12 C13 C14 C15)
+ENV_KEYS=("${COLOR_VARS[@]}" PAWS)
+VARS=("${COLOR_VARS[@]}" FG_RGB BRIGHT_RGB DIM_RGB MUTED_RGB FAINT_RGB LOCKBG)
 
 list() { local f; for f in "$T"/themes/*.env; do [ -e "$f" ] && basename "$f" .env; done; }
-current() { cat "$T/current" 2>/dev/null || echo gray; }
+current() {
+  local c
+  c=$(cat "$T/current" 2>/dev/null)
+  if [[ "$c" =~ $NAME_RE ]]; then echo "$c"; else echo gray; fi
+}
 rgb() { printf '%d;%d;%d' "0x${1:0:2}" "0x${1:2:2}" "0x${1:4:2}"; }
+# значения в sed-замене: экранируем \ & и | (разделитель)
+esc() { printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
 
-set_wall() {
-  local mode="$1" dir files=() f cur i n pick="" old
-  dir="$T/wallpapers/$(current)"
+# Читаем .env как данные, а не исполняем: только известные ключи и проверенные значения
+load_env() {
+  local f="$1" line k v n=0
+  for k in "${ENV_KEYS[@]}"; do unset "$k"; done
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    case "$line" in ''|'#'*) continue ;; esac
+    if ! [[ "$line" =~ ^([A-Z][A-Z0-9_]*)=(.*)$ ]]; then echo "$f:$n: не похоже на КЛЮЧ=значение" >&2; return 1; fi
+    k="${BASH_REMATCH[1]}"; v="${BASH_REMATCH[2]}"
+    v="${v%\"}"; v="${v#\"}"
+    case "$k" in
+      TINT|SAT|GRAIN) continue ;;  # остатки старых тем (шейдера больше нет): игнорируем
+      PAWS)  [[ "$v" =~ ^(true|false)$ ]] || { echo "$f:$n: PAWS: true или false" >&2; return 1; } ;;
+      *)
+        if [[ " ${COLOR_VARS[*]} " == *" $k "* ]]; then
+          [[ "$v" =~ ^[0-9A-Fa-f]{6}$ ]] || { echo "$f:$n: $k должен быть цветом из 6 hex-цифр (без #)" >&2; return 1; }
+        else continue  # неизвестный ключ игнорируем
+        fi ;;
+    esac
+    printf -v "$k" '%s' "$v"
+  done < "$f"
+  for k in "${COLOR_VARS[@]}"; do
+    [ "$k" = ACCENT ] && continue
+    [ -n "${!k:-}" ] || { echo "$f: нет значения $k" >&2; return 1; }
+  done
+  return 0
+}
+
+# выбор обоев: ничего не запускает, результат в PICK (пусто, если картинок нет)
+pick_wall() {
+  local mode="$1" name="$2" dir files=() f cur i n
+  PICK=""
+  dir="$T/wallpapers/$name"
   mapfile -t files < <(find "$dir" -maxdepth 1 -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \) 2>/dev/null | sort)
   n=${#files[@]}
   if [ "$n" -eq 0 ]; then
     echo "в $dir нет картинок: положи туда обои под эту тему" >&2
-    rm -f "$T/current-wall"
     return 1
   fi
   cur=$(cat "$T/current-wall" 2>/dev/null)
   case "$mode" in
-    keep) for f in "${files[@]}"; do [ "$f" = "$cur" ] && pick="$f"; done ;;
-    next) for i in "${!files[@]}"; do [ "${files[$i]}" = "$cur" ] && pick="${files[$(( (i + 1) % n ))]}"; done ;;
+    keep) for f in "${files[@]}"; do [ "$f" = "$cur" ] && PICK="$f"; done ;;
+    next) for i in "${!files[@]}"; do [ "${files[$i]}" = "$cur" ] && PICK="${files[$(( (i + 1) % n ))]}"; done ;;
   esac
-  [ -n "$pick" ] || pick="${files[$((RANDOM % n))]}"
-  printf '%s' "$pick" > "$T/current-wall"
-  old=$(pgrep -x swaybg)
-  setsid -f swaybg -i "$pick" -m fill >/dev/null 2>&1 9>&-
-  if [ -n "$old" ]; then sleep 0.4; kill $old 2>/dev/null; fi
+  [ -n "$PICK" ] || PICK="${files[$((RANDOM % n))]}"
+  return 0
 }
 
+start_wall() {
+  local pick="$1" old=()
+  if [ -n "$pick" ]; then printf '%s' "$pick" > "$T/current-wall"; else rm -f "$T/current-wall"; fi
+  [ -n "$pick" ] || return 0
+  # при установке и вне Wayland swaybg не запускаем: ему некуда рисовать
+  [ -n "${THEME_NO_RELOAD:-}" ] && return 0
+  [ -n "${WAYLAND_DISPLAY:-}" ] || return 0
+  command -v swaybg >/dev/null 2>&1 || return 0
+  mapfile -t old < <(pgrep -x swaybg)
+  setsid -f swaybg -i "$pick" -m fill </dev/null >/dev/null 2>&1 9>&-
+  if [ "${#old[@]}" -gt 0 ]; then sleep 0.4; kill "${old[@]}" 2>/dev/null; fi
+  return 0
+}
+
+STAGE=""; STAGED=(); TARGETS=()
 render() {
-  local tpl="$T/templates/$1" dest="$2"
+  local tpl="$T/templates/$1" dest="$2" out
   [ -f "$tpl" ] || return 0
-  mkdir -p "$(dirname "$dest")"
-  if [ -f "$dest" ] && [ ! -f "$dest.theme-bak" ]; then cp "$dest" "$dest.theme-bak"; fi
-  sed "${SEDARGS[@]}" "$tpl" > "$dest"
+  out="$STAGE/${#STAGED[@]}"
+  sed "${SEDARGS[@]}" "$tpl" > "$out" || return 1
+  if grep -q '{{[A-Z0-9_]*}}' "$out"; then
+    echo "в шаблоне $1 остались неподставленные значения: $(grep -o '{{[A-Z0-9_]*}}' "$out" | sort -u | tr '\n' ' ')" >&2
+    return 1
+  fi
+  STAGED+=("$out"); TARGETS+=("$dest")
 }
 
+commit() {
+  local i dest fail=0
+  for i in "${!TARGETS[@]}"; do
+    dest="${TARGETS[$i]}"
+    mkdir -p "$(dirname "$dest")"
+    if [ -f "$dest" ] && [ ! -f "$dest.theme-bak" ]; then cp -- "$dest" "$dest.theme-bak"; fi
+    if cp -- "${STAGED[$i]}" "$dest.new.$$" && mv -f -- "$dest.new.$$" "$dest"; then :; else
+      rm -f "$dest.new.$$"; echo "не удалось записать $dest" >&2; fail=1
+    fi
+  done
+  return $fail
+}
+
+# живые терминалы: шлём цвета через OSC в каждый pty пользователя (foot, kitty и др.)
+push_terminals() {
+  local seq="" i c p
+  seq+=$'\e]10;#'"$FG"$'\e\\'
+  seq+=$'\e]11;#'"$BG"$'\e\\'
+  seq+=$'\e]12;#'"$DIM"$'\e\\'
+  seq+=$'\e]17;#'"$LINE"$'\e\\'
+  seq+=$'\e]19;#'"$BRIGHT"$'\e\\'
+  for i in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    c="C$i"; seq+=$'\e]4;'"$i"';#'"${!c}"$'\e\\'
+  done
+  for p in /dev/pts/[0-9]*; do
+    [ -O "$p" ] && [ -w "$p" ] || continue
+    timeout 1 sh -c 'printf "%s" "$1" > "$2"' _ "$seq" "$p" 2>/dev/null 9>&-
+  done
+  pkill -USR1 -x kitty 2>/dev/null
+  return 0
+}
+
+reload_session() {
+  if command -v hyprctl >/dev/null 2>&1 && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+    timeout 5 hyprctl reload >/dev/null 2>&1 9>&-
+  fi
+  pkill -SIGUSR2 -x waybar 2>/dev/null
+  # swaync-client без запущенного swaync зависает: вызываем только при живом демоне и с таймаутом
+  if command -v swaync-client >/dev/null 2>&1 && pgrep -x swaync >/dev/null 2>&1; then
+    timeout 3 swaync-client -rs >/dev/null 2>&1 9>&-
+  fi
+  return 0
+}
+
+# переменные темы читаются косвенно (${!v}) при подстановке в шаблоны
+# shellcheck disable=SC2034
 apply() {
-  local name="$1" wallmode="${2:-random}" full="${3:-1}" f="$T/themes/$1.env" v wall
+  local name="$1" wallmode="${2:-random}" full="${3:-1}" f v paws
+  [ -n "${THEME_NO_RELOAD:-}" ] && full=0
+  [[ "$name" =~ $NAME_RE ]] || { echo "некорректное имя темы (буквы, цифры, - и _)" >&2; return 1; }
+  f="$T/themes/$name.env"
   if [ ! -f "$f" ]; then echo "нет темы «$name». Есть: $(list | tr '\n' ' ')" >&2; return 1; fi
-  set -a; . "$f"; set +a
-  : "${GRAIN:=0.04}" "${SAT:=0.0}" "${TINT:=1.0, 1.0, 1.0}" "${ACCENT:=$FG}"
-  echo "$name" > "$T/current"
+  load_env "$f" || return 1
+  : "${ACCENT:=$FG}" "${PAWS:=false}"
   FG_RGB=$(rgb "$FG"); BRIGHT_RGB=$(rgb "$BRIGHT"); DIM_RGB=$(rgb "$DIM"); MUTED_RGB=$(rgb "$MUTED"); FAINT_RGB=$(rgb "$FAINT")
-  set_wall "$wallmode"
-  wall=$(cat "$T/current-wall" 2>/dev/null)
-  if [ -n "$wall" ] && [ -f "$wall" ]; then LOCKBG="path = $wall"; else LOCKBG="color = rgba(${BG}ff)"; fi
+  pick_wall "$wallmode" "$name"
+  if [ -n "$PICK" ] && [ -f "$PICK" ]; then LOCKBG="path = $PICK"; else LOCKBG="color = rgba(${BG}ff)"; fi
   SEDARGS=()
-  for v in "${VARS[@]}"; do SEDARGS+=(-e "s|{{$v}}|${!v:-}|g"); done
+  for v in "${VARS[@]}"; do SEDARGS+=(-e "s|{{$v}}|$(esc "${!v:-}")|g"); done
 
-  render waybar-style.css  "$H/waybar/style.css"
-  render swaync-style.css  "$H/swaync/style.css"
-  render fuzzel.ini        "$H/fuzzel/fuzzel.ini"
-  render foot.ini          "$H/foot/foot.ini"
-  render kitty-mono.conf   "$H/kitty/mono.conf"
-  render hyprlock.conf     "$H/hypr/hyprlock.conf"
-  render hypr-theme.lua    "$H/hypr/theme.lua"
-  render grain.frag        "$H/hypr/shaders/grain.frag"
-  render gtk.css           "$H/gtk-3.0/gtk.css"
-  render gtk.css           "$H/gtk-4.0/gtk.css"
-  render qt6ct-colors.conf "$H/qt6ct/colors/mono.conf"
-  render starship.toml     "$H/starship.toml"
-  render btop.theme        "$H/btop/themes/mono.theme"
-  render shell.sh          "$T/shell.sh"
+  STAGE=$(mktemp -d "$T/.stage.XXXXXX") || return 1
+  trap 'rm -rf "$STAGE"' RETURN
+  render waybar-style.css  "$H/waybar/style.css"        || return 1
+  render swaync-style.css  "$H/swaync/style.css"        || return 1
+  render fuzzel.ini        "$H/fuzzel/fuzzel.ini"       || return 1
+  render foot.ini          "$H/foot/foot.ini"           || return 1
+  render kitty-mono.conf   "$H/kitty/mono.conf"         || return 1
+  render hyprlock.conf     "$H/hypr/hyprlock.conf"      || return 1
+  render hypr-theme.lua    "$H/hypr/theme.lua"          || return 1
+  render gtk.css           "$H/gtk-3.0/gtk.css"         || return 1
+  render gtk.css           "$H/gtk-4.0/gtk.css"         || return 1
+  render qt6ct-colors.conf "$H/qt6ct/colors/mono.conf"  || return 1
+  render starship.toml     "$H/starship.toml"           || return 1
+  render btop.theme        "$H/btop/themes/mono.theme"  || return 1
+  render shell.sh          "$T/shell.sh"                || return 1
 
-  cat > "$T/colors.json" <<JSON
-{ "bg": "#$BG", "bg2": "#$BG2", "surface": "#$SURFACE", "surface2": "#$SURFACE2", "line": "#$LINE", "faint": "#$FAINT", "muted": "#$MUTED", "dim": "#$DIM", "fg": "#$FG", "bright": "#$BRIGHT", "paws": ${PAWS:-false} }
-JSON
-[ "${PAWS:-false}" = true ] && sed -i 's/ }$/, "paws": true }/' "$T/colors.json"
+  paws=false; [ "$PAWS" = true ] && paws=true
+  printf '{ "bg": "#%s", "bg2": "#%s", "surface": "#%s", "surface2": "#%s", "line": "#%s", "faint": "#%s", "muted": "#%s", "dim": "#%s", "fg": "#%s", "bright": "#%s", "paws": %s }\n' \
+    "$BG" "$BG2" "$SURFACE" "$SURFACE2" "$LINE" "$FAINT" "$MUTED" "$DIM" "$FG" "$BRIGHT" "$paws" > "$STAGE/colors.json" || return 1
+  STAGED+=("$STAGE/colors.json"); TARGETS+=("$T/colors.json")
 
+  # все шаблоны готовы без ошибок: теперь заменяем действующие файлы
+  commit || echo "предупреждение: тема применена не полностью" >&2
+  echo "$name" > "$T/current"
+  start_wall "$PICK"
   [ -f "$H/btop/btop.conf" ] && sed -i 's|^color_theme = .*|color_theme = "mono"|' "$H/btop/btop.conf"
 
   if [ "$full" = "1" ]; then
-    if command -v hyprctl >/dev/null 2>&1 && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
-      hyprctl reload >/dev/null 2>&1
-      if [ ! -e "${XDG_RUNTIME_DIR:-/tmp}/shader-off" ]; then
-        sleep 0.3
-        hyprctl eval "hl.config({ decoration = { screen_shader = '' } })" >/dev/null 2>&1
-        sleep 0.2
-        hyprctl eval "hl.config({ decoration = { screen_shader = '$H/hypr/shaders/grain.frag' } })" >/dev/null 2>&1
-      fi
-    fi
-    pkill -SIGUSR2 -x waybar 2>/dev/null
-    command -v swaync-client >/dev/null && swaync-client -rs >/dev/null 2>&1
+    push_terminals
+    reload_session
   fi
   echo "тема: $name"
 }
@@ -94,10 +194,11 @@ case "${1:-}" in
   current) current ;;
   wall)
     case "${2:-random}" in
-      apply) set_wall keep ;;
+      apply) pick_wall keep "$(current)"; start_wall "$PICK" ;;
       next) apply "$(current)" next 0 ;;
       random) apply "$(current)" random 0 ;;
+      *) echo "theme wall next|random|apply" >&2; exit 1 ;;
     esac ;;
-  "") echo "использование: theme <имя> | theme list | theme current | theme wall next|random"; list ;;
+  "") echo "использование: theme <имя> | theme list | theme current | theme wall next|random|apply"; list ;;
   *) apply "$1" random 1 ;;
 esac

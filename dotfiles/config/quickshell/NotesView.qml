@@ -10,6 +10,11 @@ Scope {
   property bool picking: false
   property bool recording: false
   property bool loaded: false
+  property bool haveStore: false
+  property bool storeDone: false
+  property bool oldDone: false
+  property bool legacyDone: false
+  readonly property int schemaVersion: 2
   property bool syncing: false
   property var boards: []
   property int rev: 0
@@ -18,6 +23,7 @@ Scope {
   property string query: ""
   property string msg: ""
   property string playing: ""
+  property string pendingPlay: ""
   property string previewPath: ""
   property string confirmDel: ""
   property int zTop: 1
@@ -51,7 +57,55 @@ Scope {
     return null;
   }
   function save() { saveTimer.restart(); }
-  function flush() { store.setText(JSON.stringify(boards)); }
+  function flush() {
+    // пока данные не прочитаны, писать нельзя: иначе пустая доска затрёт boards.json
+    if (!loaded) return;
+    store.setText(JSON.stringify({ version: schemaVersion, boards: boards }));
+  }
+
+  // ---- проверка структуры данных ----
+  function finite(v, d) { return (typeof v === "number" && isFinite(v)) ? v : d; }
+  function cleanItem(i) {
+    if (!i || typeof i !== "object") return null;
+    if (["text", "image", "gif", "audio", "file"].indexOf(i.type) < 0) return null;
+    const o = { id: (typeof i.id === "string" && i.id) ? i.id : uid(), type: i.type,
+                x: finite(i.x, 40), y: finite(i.y, 40), w: Math.max(90, finite(i.w, 280)), h: Math.max(70, finite(i.h, 200)), z: finite(i.z, 1) };
+    if (i.type === "text") o.text = (typeof i.text === "string") ? i.text : "";
+    else {
+      o.path = (typeof i.path === "string") ? i.path : "";
+      o.name = (typeof i.name === "string") ? i.name : o.path.split("/").pop();
+    }
+    return o;
+  }
+  function cleanBoard(b) {
+    if (!b || typeof b !== "object") return null;
+    const its = Array.isArray(b.items) ? b.items.map(cleanItem).filter(x => x !== null) : [];
+    return { id: (typeof b.id === "string" && b.id) ? b.id : uid(), title: (typeof b.title === "string") ? b.title : "",
+             updated: finite(b.updated, Date.now()), pinned: !!b.pinned, items: its };
+  }
+  // boards.json: версия 1 это просто массив досок, версия 2 это { version, boards }
+  function parseStore(txt) {
+    const j = JSON.parse(txt);
+    let arr;
+    if (Array.isArray(j)) arr = j;
+    else if (j && Array.isArray(j.boards)) {
+      if (typeof j.version === "number" && j.version > schemaVersion) throw new Error("формат версии " + j.version + " новее, чем понимает эта версия");
+      arr = j.boards;
+    } else throw new Error("неожиданная структура файла");
+    const out = arr.map(cleanBoard).filter(b => b !== null);
+    if (out.length !== arr.length) console.log("notes: пропущено повреждённых досок: " + (arr.length - out.length));
+    return out;
+  }
+  // все три источника (boards.json, notes.json, notes.txt) дали ответ: можно решать, что загружать
+  function settle() {
+    if (loaded || !(storeDone && oldDone && legacyDone)) return;
+    loaded = true;
+    if (haveStore) backupProc.running = true;
+    else migrate();
+    rev++;
+    if (boards.length) select(boards[0].id);
+    if (open && boards.length === 0) newBoard();
+  }
   function select(id) {
     selId = id;
     const b = cur();
@@ -145,20 +199,23 @@ Scope {
     try {
       if (oldStore.loaded) {
         const old = JSON.parse(oldStore.text());
+        if (!Array.isArray(old)) throw new Error("notes.json: ожидался массив");
         arr = old.map(n => {
+          if (!n || typeof n !== "object") return null;
           const its = [];
-          if (n.text) its.push({ id: uid(), type: "text", x: 40, y: 40, w: 340, h: 240, z: 1, text: n.text });
-          (n.files || []).forEach((f, k) => its.push({ id: uid(), type: f.type, x: 400 + (k % 2) * 250, y: 40 + Math.floor(k / 2) * 220, w: f.type === "audio" ? 260 : 230, h: f.type === "audio" ? 96 : 190, z: 2 + k, path: f.path, name: f.name }));
-          return { id: n.id || uid(), title: n.title || "", updated: n.updated || Date.now(), pinned: !!n.pinned, items: its };
-        });
+          if (n.text) its.push({ id: uid(), type: "text", x: 40, y: 40, w: 340, h: 240, z: 1, text: String(n.text) });
+          (Array.isArray(n.files) ? n.files : []).forEach((f, k) => its.push({ id: uid(), type: f.type, x: 400 + (k % 2) * 250, y: 40 + Math.floor(k / 2) * 220, w: f.type === "audio" ? 260 : 230, h: f.type === "audio" ? 96 : 190, z: 2 + k, path: f.path, name: f.name }));
+          return { id: n.id, title: n.title, updated: n.updated, pinned: !!n.pinned, items: its };
+        }).map(cleanBoard).filter(b => b !== null);
+        console.log("notes: миграция notes.json, досок: " + arr.length);
       }
-    } catch (e) { arr = []; }
+    } catch (e) { console.log("notes: миграция notes.json не удалась: " + e); msg = "не удалось перенести старые заметки (notes.json остался на месте)"; arr = []; }
     if (arr.length === 0 && legacy.loaded && legacy.text().trim()) {
       arr.push({ id: uid(), title: "Заметка", updated: Date.now(), pinned: false, items: [{ id: uid(), type: "text", x: 40, y: 40, w: 360, h: 260, z: 1, text: legacy.text().trim() }] });
+      console.log("notes: миграция notes.txt");
     }
     boards = arr;
-    rev++;
-    if (arr.length) { select(arr[0].id); save(); }
+    if (arr.length) save();
   }
   function runMedia(kind) {
     if (mediaProc.running) return;
@@ -172,11 +229,19 @@ Scope {
     if (recording) stopRec.running = true;
     else runMedia("record");
   }
-  function togglePlay(p) {
-    if (playProc.running) { stopPlay.running = true; return; }
+  function startPlay(p) {
     playing = p;
     playProc.command = ["bash", media, "play", p];
     playProc.running = true;
+  }
+  // нажатие на ту же заметку останавливает её; на другую: остановить текущую, дождаться выхода, включить выбранную
+  function togglePlay(p) {
+    if (playProc.running) {
+      pendingPlay = (playing === p) ? "" : p;
+      stopPlay.running = true;
+      return;
+    }
+    startPlay(p);
   }
 
   onOpenChanged: {
@@ -199,30 +264,39 @@ Scope {
   FileView {
     id: store
     path: nt.dir + "/boards.json"
+    printErrors: false
     onLoaded: {
       try {
-        nt.boards = JSON.parse(store.text());
+        nt.boards = nt.parseStore(store.text());
+        nt.haveStore = true;
         let z = 1;
         nt.boards.forEach(b => b.items.forEach(i => { if ((i.z || 0) > z) z = i.z; }));
         nt.zTop = z;
-      } catch (e) { console.log("boards.json: " + e); nt.boards = []; }
-      nt.loaded = true;
-      nt.rev++;
-      if (nt.boards.length) nt.select(nt.boards[0].id);
+      } catch (e) {
+        console.log("boards.json: " + e);
+        nt.boards = [];
+        nt.haveStore = false;
+        // повреждённый файл не затираем молча: сохраняем копию рядом
+        corruptProc.running = true;
+        nt.msg = "boards.json повреждён, копия сохранена рядом (boards.json.corrupt-…)";
+      }
+      nt.storeDone = true;
+      nt.settle();
     }
+    onLoadFailed: { nt.storeDone = true; nt.settle(); }
   }
-  FileView { id: oldStore; path: nt.dir + "/notes.json" }
-  FileView { id: legacy; path: nt.home + "/.config/quickshell/notes.txt" }
+  FileView { id: oldStore; path: nt.dir + "/notes.json"; printErrors: false; onLoaded: { nt.oldDone = true; nt.settle(); } onLoadFailed: { nt.oldDone = true; nt.settle(); } }
+  FileView { id: legacy; path: nt.home + "/.config/quickshell/notes.txt"; printErrors: false; onLoaded: { nt.legacyDone = true; nt.settle(); } onLoadFailed: { nt.legacyDone = true; nt.settle(); } }
+  Process { id: backupProc; command: ["sh", "-c", '[ -f "$1" ] && cp -f -- "$1" "$1.bak"', "_", nt.dir + "/boards.json"] }
+  Process { id: corruptProc; command: ["sh", "-c", 'cp -f -- "$1" "$1.corrupt-$(date +%Y%m%d-%H%M%S)"', "_", nt.dir + "/boards.json"] }
 
-  Timer { id: saveTimer; interval: 500; onTriggered: nt.flush() }
+  Timer { id: saveTimer; interval: 500; onTriggered: { if (nt.loaded) nt.flush(); else saveTimer.restart(); } }
   Timer { id: confirmTimer; interval: 3000; onTriggered: nt.confirmDel = "" }
+  // только предупреждение: источники данных обязаны ответить сигналом loaded или loadFailed
   Timer {
-    interval: 900
+    interval: 5000
     running: true
-    onTriggered: {
-      if (!nt.loaded) { nt.loaded = true; nt.migrate(); }
-      if (nt.open && nt.boards.length === 0) nt.newBoard();
-    }
+    onTriggered: { if (!nt.loaded) { console.log("notes: данные не загрузились за 5 с"); nt.msg = "заметки ещё не загрузились"; } }
   }
 
   Process {
@@ -238,7 +312,16 @@ Scope {
     onExited: { nt.picking = false; nt.recording = false; }
   }
   Process { id: stopRec; command: ["bash", nt.media, "stop"] }
-  Process { id: playProc; onExited: nt.playing = "" }
+  Process {
+    id: playProc
+    stdout: StdioCollector {
+      onStreamFinished: { const t = text.trim(); if (t.indexOf("ERR:") === 0) nt.msg = t.slice(4); }
+    }
+    onExited: {
+      nt.playing = "";
+      if (nt.pendingPlay !== "") { const p = nt.pendingPlay; nt.pendingPlay = ""; nt.startPlay(p); }
+    }
+  }
   Process { id: stopPlay; command: ["bash", nt.media, "stopplay"] }
 
   component Txt: Text {
@@ -431,8 +514,8 @@ Scope {
         onPositionChanged: (m) => {
           if (!pressed) return;
           const p = mapToItem(it.parent, m.x, m.y);
-          it.width = Math.max(90, ow + p.x - sx);
-          it.height = Math.max(70, oh + p.y - sy);
+          it.width = Math.max(90, Math.min(it.parent.width, ow + p.x - sx));
+          it.height = Math.max(70, Math.min(it.parent.height, oh + p.y - sy));
         }
         onReleased: nt.patchItem(it.modelData.id, { w: it.width, h: it.height })
       }

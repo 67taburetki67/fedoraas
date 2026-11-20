@@ -62,8 +62,9 @@ Item {
     onPositionChanged: (m) => {
       if (!pressed) return;
       const p = mapToItem(frame.parent, m.x, m.y);
-      frame.sh.setGeom(frame.kind, frame.gid, "x", Math.max(0, Math.min(0.95, ox + (p.x - sx) / frame.pw)));
-      frame.sh.setGeom(frame.kind, frame.gid, "y", Math.max(0, Math.min(0.95, oy + (p.y - sy) / frame.ph)));
+      // границы (x+w <= 1, y+h <= 1) проверяет setGeom
+      frame.sh.setGeom(frame.kind, frame.gid, "x", ox + (p.x - sx) / frame.pw);
+      frame.sh.setGeom(frame.kind, frame.gid, "y", oy + (p.y - sy) / frame.ph);
     }
     onReleased: frame.sh.saveConfig()
   }
@@ -87,7 +88,7 @@ Item {
       onPositionChanged: (m) => {
         if (!pressed) return;
         const dx = mapToItem(frame.parent, m.x, m.y).x - sx;
-        frame.sh.setGeom(frame.kind, frame.gid, "w", Math.max(0.05, Math.min(0.9, ow + dx / frame.pw)));
+        frame.sh.setGeom(frame.kind, frame.gid, "w", ow + dx / frame.pw);
       }
       onReleased: frame.sh.saveConfig()
     }
@@ -112,7 +113,7 @@ Item {
       onPositionChanged: (m) => {
         if (!pressed) return;
         const dy = mapToItem(frame.parent, m.x, m.y).y - sy;
-        frame.sh.setGeom(frame.kind, frame.gid, "h", Math.max(0.05, Math.min(0.95, oh + dy / frame.ph)));
+        frame.sh.setGeom(frame.kind, frame.gid, "h", oh + dy / frame.ph);
       }
       onReleased: frame.sh.saveConfig()
     }
@@ -139,8 +140,8 @@ Item {
       onPositionChanged: (m) => {
         if (!pressed) return;
         const p = mapToItem(frame.parent, m.x, m.y);
-        frame.sh.setGeom(frame.kind, frame.gid, "w", Math.max(0.05, Math.min(0.9, ow + (p.x - sx) / frame.pw)));
-        frame.sh.setGeom(frame.kind, frame.gid, "h", Math.max(0.05, Math.min(0.95, oh + (p.y - sy) / frame.ph)));
+        frame.sh.setGeom(frame.kind, frame.gid, "w", ow + (p.x - sx) / frame.pw);
+        frame.sh.setGeom(frame.kind, frame.gid, "h", oh + (p.y - sy) / frame.ph);
       }
       onReleased: frame.sh.saveConfig()
     }
@@ -187,7 +188,7 @@ Item {
           width: parent.width - 40
           height: 20
           source: frame.aVal
-          onMoved: v => { frame.sh.setGeom(frame.kind, frame.gid, "a", Math.max(0.2, Math.min(1, v))); frame.sh.saveConfig(); }
+          onMoved: v => { frame.sh.setGeom(frame.kind, frame.gid, "a", v); frame.sh.saveConfig(); }
         }
       }
       Row {
@@ -200,7 +201,7 @@ Item {
           width: parent.width - 40
           height: 20
           source: frame.bgVal
-          onMoved: v => { frame.sh.setGeom(frame.kind, frame.gid, "bg", Math.max(0, Math.min(1, v))); frame.sh.saveConfig(); }
+          onMoved: v => { frame.sh.setGeom(frame.kind, frame.gid, "bg", v); frame.sh.saveConfig(); }
         }
       }
     }

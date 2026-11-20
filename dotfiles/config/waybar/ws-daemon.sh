@@ -2,6 +2,7 @@
 RUN="${XDG_RUNTIME_DIR:-/tmp}"
 STATE="$RUN/ws-active"
 trap 'pkill -P $$ 2>/dev/null' EXIT
+trap 'exit 0' TERM INT HUP
 active() { hyprctl activeworkspace -j 2>/dev/null | grep -m1 '"id"' | tr -dc '0-9-'; }
 publish() {
   local cur="$1" old=""

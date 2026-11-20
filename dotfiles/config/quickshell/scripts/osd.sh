@@ -9,7 +9,7 @@ esac
 case "$1" in
   vol*|mute)
     v=$(wpctl get-volume @DEFAULT_AUDIO_SINK@)
-    pct=$(echo "$v" | awk '{printf "%d", $2*100}')
+    pct=$(echo "$v" | awk '{printf "%.0f", $2*100}')
     if echo "$v" | grep -q MUTED; then kind=muted; else kind=vol; fi
     quickshell ipc call osd show "$kind" "${pct:-0}" ;;
   bri*)

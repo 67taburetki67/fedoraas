@@ -40,7 +40,7 @@ Scope {
       { name: "Шпаргалка клавиш", sub: "все сочетания", kw: "keys cheatsheet бинды клавиши", cmd: ipc("cheatsheet"), key: "a:cheat" },
       { name: "Следующие обои", sub: "в текущей теме", kw: "wallpaper обои", cmd: [ln.bin + "/theme", "wall", "next"], key: "a:wall" },
       { name: "Случайные обои", sub: "в текущей теме", kw: "wallpaper обои random", cmd: [ln.bin + "/theme", "wall", "random"], key: "a:wallr" },
-      { name: "Заблокировать", sub: "экран блокировки", kw: "lock блокировка", cmd: ["sh", "-c", "setsid -f hyprlock"], key: "a:lock" },
+      { name: "Заблокировать", sub: "экран блокировки", kw: "lock блокировка", cmd: ["sh", "-c", "command -v hyprlock >/dev/null 2>&1 && setsid -f hyprlock || notify-send 'Экран блокировки' 'hyprlock не установлен: ./install.sh --with-lock'"], key: "a:lock" },
       { name: "Сон", sub: "приостановить систему", kw: "suspend sleep сон", cmd: ["systemctl", "suspend"], key: "a:sleep" },
       { name: "Выйти из сессии", sub: "закрыть Hyprland", kw: "logout exit выход", cmd: ["hyprctl", "dispatch", "hl.dsp.exit()"], key: "a:exit", confirm: true },
       { name: "Перезагрузка", sub: "перезагрузить компьютер", kw: "reboot restart перезагрузка", cmd: ["systemctl", "reboot"], key: "a:reboot", confirm: true },
@@ -50,14 +50,62 @@ Scope {
     return a;
   }
 
+  // Калькулятор без eval: рекурсивный разбор + - * / % ^ (и **), скобки, унарный минус
+  function evalExpr(src) {
+    const s = src.replace(/\*\*/g, "^");
+    let i = 0, depth = 0;
+    const peek = () => { while (i < s.length && /\s/.test(s[i])) i++; return s[i]; };
+    const number = () => {
+      peek();
+      const m = /^(\d+\.?\d*|\.\d+)/.exec(s.slice(i));
+      if (!m) throw new Error("ожидалось число");
+      i += m[0].length;
+      return parseFloat(m[0]);
+    };
+    const atom = () => {
+      if (peek() === "(") {
+        if (++depth > 40) throw new Error("слишком глубокая вложенность");
+        i++;
+        const v = expr();
+        if (peek() !== ")") throw new Error("нет закрывающей скобки");
+        i++; depth--;
+        return v;
+      }
+      return number();
+    };
+    const power = () => { const b = atom(); if (peek() === "^") { i++; return Math.pow(b, unary()); } return b; };
+    const unary = () => { const c = peek(); if (c === "-") { i++; return -unary(); } if (c === "+") { i++; return unary(); } return power(); };
+    const term = () => {
+      let v = unary();
+      for (;;) {
+        const c = peek();
+        if (c === "*") { i++; v *= unary(); }
+        else if (c === "/") { i++; v /= unary(); }
+        else if (c === "%") { i++; v %= unary(); }
+        else return v;
+      }
+    };
+    const expr = () => {
+      let v = term();
+      for (;;) {
+        const c = peek();
+        if (c === "+") { i++; v += term(); }
+        else if (c === "-") { i++; v -= term(); }
+        else return v;
+      }
+    };
+    const r = expr();
+    if (peek() !== undefined) throw new Error("лишние символы");
+    return r;
+  }
   function calc(q0, apps, use, th) {
     const q = q0.trim();
     const low = q.toLowerCase();
     const all = [];
 
-    if (q !== "" && /^=?[0-9\s+\-*\/().,%^]+$/.test(q) && /[+\-*\/^%]/.test(q.replace(/^=/, "").replace(/^\s*-/, ""))) {
+    if (q !== "" && q.length <= 200 && /^=?[0-9\s+\-*\/().,%^]+$/.test(q) && /[+\-*\/^%]/.test(q.replace(/^=/, "").replace(/^\s*-/, ""))) {
       try {
-        const v = eval(q.replace(/^=/, "").replace(/,/g, ".").replace(/\^/g, "**"));
+        const v = evalExpr(q.replace(/^=/, "").replace(/,/g, "."));
         if (typeof v === "number" && isFinite(v)) all.push({ kind: "calc", title: String(Math.round(v * 1e10) / 1e10), sub: q + "   (Enter копирует)", icon: "", score: 1000, key: "calc" });
       } catch (e) { }
     }
@@ -104,7 +152,7 @@ Scope {
         all.push({ kind: "act", title: a.name, sub: a.sub, icon: "", score: f * 0.95, key: a.key, cmd: a.cmd, confirm: !!a.confirm });
       }
     }
-    all.sort((x, y) => (y.score - x.score) || (x.title < y.title ? -1 : 1));
+    all.sort((x, y) => (y.score - x.score) || (x.title < y.title ? -1 : (x.title > y.title ? 1 : 0)));
     return all.slice(0, 9);
   }
 

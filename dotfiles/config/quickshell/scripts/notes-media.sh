@@ -35,26 +35,42 @@ case "$1" in
     else
       echo "ERR:нет pw-record и arecord"; exit 0
     fi
-    echo $! > "$PID"
-    wait $!
-    rm -f "$PID"
+    rpid=$!
+    echo "$rpid" > "$PID"
+    wait "$rpid"
+    [ "$(cat "$PID" 2>/dev/null)" = "$rpid" ] && rm -f "$PID"
     if [ -s "$f" ]; then echo "$f"; else rm -f "$f"; echo "ERR:запись пустая, проверь микрофон"; fi
     ;;
   stop)
-    [ -f "$PID" ] && kill -INT "$(cat "$PID")" 2>/dev/null
+    # убиваем только процесс записи: pid-файл мог остаться от прошлого сеанса
+    pid=$(cat "$PID" 2>/dev/null)
+    case "$(cat "/proc/${pid:-0}/comm" 2>/dev/null)" in
+      pw-record|arecord) kill -INT "$pid" 2>/dev/null ;;
+    esac
     ;;
   play)
     f="$2"
-    echo $$ > "$PLAYPID"
-    for p in pw-play paplay; do
-      if command -v "$p" >/dev/null; then exec "$p" "$f"; fi
-    done
-    command -v mpv >/dev/null && exec mpv --no-video --really-quiet "$f"
-    command -v ffplay >/dev/null && exec ffplay -nodisp -autoexit -loglevel quiet "$f"
-    echo "ERR:нет проигрывателя (pw-play, paplay, mpv)"
+    player=()
+    if command -v pw-play >/dev/null; then player=(pw-play "$f")
+    elif command -v paplay >/dev/null; then player=(paplay "$f")
+    elif command -v mpv >/dev/null; then player=(mpv --no-video --really-quiet "$f")
+    elif command -v ffplay >/dev/null; then player=(ffplay -nodisp -autoexit -loglevel quiet "$f")
+    else echo "ERR:нет проигрывателя (pw-play, paplay, mpv)"; exit 0
+    fi
+    # без exec: после конца воспроизведения скрипт сам удаляет pid-файл, и «стоп» не заденет чужой процесс
+    "${player[@]}" &
+    ppid=$!
+    echo "$ppid" > "$PLAYPID"
+    trap 'kill "$ppid" 2>/dev/null' TERM INT
+    wait "$ppid"
+    [ "$(cat "$PLAYPID" 2>/dev/null)" = "$ppid" ] && rm -f "$PLAYPID"
     ;;
   stopplay)
-    [ -f "$PLAYPID" ] && kill "$(cat "$PLAYPID")" 2>/dev/null
+    pid=$(cat "$PLAYPID" 2>/dev/null)
+    case "$(cat "/proc/${pid:-0}/comm" 2>/dev/null)" in
+      pw-play|paplay|mpv|ffplay) kill "$pid" 2>/dev/null ;;
+      *) rm -f "$PLAYPID" ;;
+    esac
     ;;
 esac
 exit 0

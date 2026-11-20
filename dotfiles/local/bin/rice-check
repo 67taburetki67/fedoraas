@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # rice-check [--fix]: проверка всего райса; --fix чинит безопасное
-FIX=0; [ "$1" = "--fix" ] && FIX=1
+# shellcheck disable=SC2088  # «~» в сообщениях это просто текст
+FIX=0; [ "${1:-}" = "--fix" ] && FIX=1
 Q="$HOME/.config/quickshell"; H="$HOME/.config/hypr"; T="$HOME/.config/themes"
 W=0; F=0
 ok()   { printf ' [ ok ] %s\n' "$1"; }
@@ -35,7 +36,7 @@ done
 echo "== Hyprland =="
 if [ -f "$H/monochrome.lua" ]; then
   if [ $FIX = 1 ]; then
-    awk '/^hl\.(bind|layer_rule|animation|curve|env|monitor)\(/ { if (seen[$0]++) next } { print }' "$H/monochrome.lua" > /tmp/mono.dd && cp /tmp/mono.dd "$H/monochrome.lua"
+    dd=$(mktemp) && awk '/^hl\.(bind|layer_rule|animation|curve|env|monitor)\(/ { if (seen[$0]++) next } { print }' "$H/monochrome.lua" > "$dd" && cp "$dd" "$H/monochrome.lua"; rm -f "$dd"
     sed -i '/^  hl.exec_cmd("waybar")$/d; /^  hl.exec_cmd("swaync")$/d; /^  hl.exec_cmd("hypridle")$/d; /^  hl.exec_cmd("quickshell")$/d; /^  hl.exec_cmd("env QT_QUICK_BACKEND=software quickshell")$/d' "$H/monochrome.lua"
     ok "убрал одинаковые строки и прямые запуски служб в monochrome.lua"
   fi
@@ -45,10 +46,19 @@ if [ -f "$H/monochrome.lua" ]; then
   grep -qE 'exec_cmd\("(waybar|swaync|hypridle|quickshell|env QT_QUICK_BACKEND=software quickshell)"\)' "$H/monochrome.lua" && warn "есть прямые запуски служб рядом с rice up (будут двойники)"
 else bad "нет monochrome.lua"; fi
 if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || [ -d "${XDG_RUNTIME_DIR:-/nonexistent}/hypr" ]; then
-  [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t "$XDG_RUNTIME_DIR/hypr/" | head -n1)
+  if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+    sig=$(ls -t "$XDG_RUNTIME_DIR/hypr/" | head -n1); export HYPRLAND_INSTANCE_SIGNATURE="$sig"
+  fi
   e=$(hyprctl configerrors 2>&1 | head -3)
   [ -z "$e" ] && ok "ошибок конфига Hyprland нет" || bad "ошибки конфига: $e"
 else warn "Hyprland не найден (запусти из foot внутри Hyprland, чтобы проверить конфиг)"; fi
+
+echo "== автоматика =="
+# ничего не должно выключать или блокировать экран само
+if pgrep -x hypridle >/dev/null; then warn "запущен hypridle: экран будет блокироваться сам (остановить: pkill hypridle)"; else ok "автоблокировки нет"; fi
+if have kmscon-launch-gui; then
+  grep -q "kmscon-launch-gui start-hyprland" "$HOME/.bashrc" 2>/dev/null && ok "алиас hypr через kmscon-launch-gui" || warn "Fedora 45 с kmscon: нужен алиас hypr='kmscon-launch-gui start-hyprland' (./install.sh обновит ~/.bashrc)"
+fi
 
 echo "== службы =="
 for s in quickshell waybar swaync; do
@@ -81,7 +91,12 @@ echo "== система =="
 rpm -q polkit >/dev/null 2>&1 && ok "polkit установлен" || warn "нет polkit: выключение и перезагрузка из панели могут не работать (sudo dnf install -y polkit)"
 systemctl is-active --quiet sshd 2>/dev/null && warn "SSH-сервер включён (если не нужен: sudo systemctl disable --now sshd)"
 fc-list 2>/dev/null | grep -qi 'JetBrains Mono' && ok "шрифт JetBrains Mono" || warn "нет шрифта JetBrains Mono (sudo dnf install -y jetbrains-mono-fonts)"
-for c in quickshell waybar swaync foot nmcli wpctl playerctl cava grim slurp wl-copy socat fuzzel; do have "$c" || warn "нет программы: $c"; done
+for c in hyprctl quickshell waybar swaync foot swaybg wl-copy; do have "$c" && continue; bad "нет обязательной программы: $c"; done
+dep() { have "$1" || warn "нет $1: не будет функции «$2»"; }
+dep nmcli "панель Wi-Fi"; dep wpctl "громкость"; dep playerctl "плеер"; dep cava "визуализатор"
+dep grim "скриншоты"; dep slurp "скриншот области"; dep socat "номера рабочих столов в панели"; dep fuzzel "выбор из истории буфера"
+dep cliphist "история буфера (SUPER+SHIFT+V)"; dep satty "разметка скриншотов"; dep hyprsunset "ночной режим"
+dep brightnessctl "яркость"; dep notify-send "уведомления из скриптов"
 for c in btop fastfetch mousepad magick; do have "$c" || warn "необязательно, но нет: $c"; done
 
 echo

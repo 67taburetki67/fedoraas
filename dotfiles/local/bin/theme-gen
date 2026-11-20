@@ -1,16 +1,29 @@
 #!/usr/bin/env bash
-# theme-gen <имя> <оттенок 0-360> [насыщенность 0-100, по умолчанию 50] [paws]
-name="$1"; hue="$2"; sat="${3:-50}"; paws=false
-[ "$4" = paws ] && paws=true
-if [ -z "$name" ] || [ -z "$hue" ]; then echo "использование: theme-gen имя оттенок [насыщенность] [paws]"; exit 1; fi
+# theme-gen [--force] <имя> <оттенок 0-360> [насыщенность 0-100, по умолчанию 50] [paws]
+force=0
+if [ "${1:-}" = --force ] || [ "${1:-}" = -f ]; then force=1; shift; fi
+name="${1:-}"; hue="${2:-}"; sat="${3:-50}"; paws=false
+[ "${4:-}" = paws ] && paws=true
+usage() { echo "использование: theme-gen [--force] имя оттенок(0-360) [насыщенность(0-100)] [paws]" >&2; exit 1; }
+[ -n "$name" ] && [ -n "$hue" ] || usage
+[[ "$name" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "имя темы: только латинские буквы, цифры, - и _" >&2; exit 1; }
+num='^[0-9]+([.][0-9]+)?$'
+[[ "$hue" =~ $num ]] && awk -v v="$hue" 'BEGIN { exit !(v >= 0 && v <= 360) }' || { echo "оттенок должен быть числом от 0 до 360" >&2; exit 1; }
+[[ "$sat" =~ $num ]] && awk -v v="$sat" 'BEGIN { exit !(v >= 0 && v <= 100) }' || { echo "насыщенность должна быть числом от 0 до 100" >&2; exit 1; }
 T="$HOME/.config/themes"
 mkdir -p "$T/themes" "$T/wallpapers/$name"
-if [ -f "$T/themes/$name.env" ]; then echo "тема $name уже есть, пропускаю"; exit 0; fi
+if [ -f "$T/themes/$name.env" ] && [ "$force" = 0 ]; then
+  echo "тема $name уже есть, пропускаю (чтобы пересоздать: theme-gen --force $name ...)"
+  exit 0
+fi
+tmp=$(mktemp "$T/themes/.gen.XXXXXX") || exit 1
+trap 'rm -f "$tmp"' EXIT
 awk -v H="$hue" -v S="$sat" -v PAWS="$paws" '
 function ab(x) { return x < 0 ? -x : x }
 function conv(h, s, l,   c, x, m, hp) {
   h = h % 360; if (h < 0) h += 360
   if (s > 100) s = 100
+  if (s < 0) s = 0
   s = s / 100
   c = (1 - ab(2 * l - 1)) * s
   hp = h / 60
@@ -41,11 +54,7 @@ BEGIN {
   for (i = 1; i <= 7; i++) printf "C%d=%s\n", i, hx(H + dh[i], S * 0.55, ll[i])
   printf "C8=%s\n", hx(H, S * 0.45, 0.240)
   for (i = 1; i <= 7; i++) printf "C%d=%s\n", i + 8, hx(H + dh[i], S * 0.60, lh[i])
-  conv(H, S * 0.60, 0.90)
-  mx = R; if (G > mx) mx = G; if (B > mx) mx = B
-  printf "TINT=\"%.2f, %.2f, %.2f\"\n", R / mx, G / mx, B / mx
-  print "SAT=0.12"
-  print "GRAIN=0.04"
   print "PAWS=" PAWS
-}' > "$T/themes/$name.env"
+}' > "$tmp" || exit 1
+mv -f -- "$tmp" "$T/themes/$name.env"
 echo "тема $name создана; обои кладут в $T/wallpapers/$name/"

@@ -12,23 +12,28 @@ else
 fi
 
 ext=$(echo "${in##*.}" | tr 'A-Z' 'a-z')
-base=$(basename "${in%.*}")
+base=$(basename "${in%.*}" | tr '[]' '__')
 stamp=$(date +%s)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
+# ImageMagick принимает [ ] в имени за выбор кадра: обрабатываем копию с простым именем
+orig="$in"
+if ! cp -- "$in" "$tmp/input.$ext" 2>/dev/null; then echo "NOTE:не удалось прочитать файл"; echo "$orig"; exit 0; fi
+in="$tmp/input.$ext"
+
 if [ "$ext" = gif ]; then
-  "${IM[@]}" "$in" -coalesce -resize '800x800>' "$tmp/src.gif" || { echo "NOTE:не удалось обработать GIF, добавлен оригинал"; echo "$in"; exit 0; }
+  "${IM[@]}" "$in" -coalesce -resize '800x800>' "$tmp/src.gif" || { echo "NOTE:не удалось обработать GIF, добавлен оригинал"; echo "$orig"; exit 0; }
   src="$tmp/src.gif"
   out="$OUT/$base-$stamp-r.gif"
 else
-  "${IM[@]}" "${in}[0]" -resize '1600x1600>' "$tmp/src.png" || { echo "NOTE:не удалось обработать картинку, добавлен оригинал"; echo "$in"; exit 0; }
+  "${IM[@]}" "${in}[0]" -resize '1600x1600>' "$tmp/src.png" || { echo "NOTE:не удалось обработать картинку, добавлен оригинал"; echo "$orig"; exit 0; }
   src="$tmp/src.png"
   out="$OUT/$base-$stamp-r.png"
 fi
 
 read -r W H < <("${ID[@]}" -format '%w %h\n' "${src}[0]" 2>/dev/null)
-if [ -z "$W" ] || [ -z "$H" ]; then echo "$in"; exit 0; fi
+if [ -z "$W" ] || [ -z "$H" ]; then echo "$orig"; exit 0; fi
 m=$(( W < H ? W : H ))
 R=$(( m * 9 / 100 ))
 [ "$R" -lt 10 ] && R=10
@@ -45,5 +50,5 @@ if [ -s "$out" ]; then
   echo "$out"
 else
   echo "NOTE:скругление не получилось, добавлена оригинальная картинка"
-  echo "$in"
+  echo "$orig"
 fi

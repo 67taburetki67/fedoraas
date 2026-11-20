@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 p=()
 [ -n "$1" ] && p=(-p "$1")
-st=$(playerctl "${p[@]}" status 2>/dev/null)
 echo "players=$(playerctl -l 2>/dev/null | paste -sd, -)"
+# разделитель \x1f: в названиях треков часто встречается « | »; статус берём тем же вызовом, что и метаданные
+fmt=$'{{status}}\x1f{{artist}}\x1f{{title}}\x1f{{album}}\x1f{{mpris:artUrl}}\x1f{{mpris:length}}\x1f{{playerName}}'
+IFS=$'\x1f' read -r st artist title album art len name < <(playerctl "${p[@]}" metadata --format "$fmt" 2>/dev/null)
 if [ -z "$st" ]; then echo "status=none"; exit 0; fi
-fmt='{{artist}}|{{title}}|{{album}}|{{mpris:artUrl}}|{{mpris:length}}|{{playerName}}'
-IFS='|' read -r artist title album art len name < <(playerctl "${p[@]}" metadata --format "$fmt" 2>/dev/null)
 echo "status=$st"
 echo "artist=$artist"
 echo "title=$title"

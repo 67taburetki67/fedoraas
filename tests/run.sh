@@ -53,6 +53,13 @@ check "вредная строка не выполнилась" test ! -e "$TMP/
 
 check "старая тема с TINT/SAT/GRAIN всё ещё применяется" bash -c 'cp "$HOME/.config/themes/themes/gray.env" "$HOME/.config/themes/themes/old.env"; printf "TINT=\"1.0, 1.0, 1.0\"\nSAT=0.0\nGRAIN=0.04\n" >> "$HOME/.config/themes/themes/old.env"; THEME_NO_RELOAD=1 theme old'
 
+echo "== клавиши громкости и яркости =="
+MONO="$D/config/hypr/monochrome.lua"
+for k in XF86AudioMute XF86AudioLowerVolume XF86AudioRaiseVolume XF86MonBrightnessDown XF86MonBrightnessUp; do
+  check "$k: сначала unbind, потом bind" bash -c 'u=$(grep -n "\"$0\"" "$1" | head -1 | cut -d: -f1); b=$(grep -n "hl.bind(\"$0\"" "$1" | head -1 | cut -d: -f1); [ -n "$u" ] && [ -n "$b" ] && [ "$u" -le "$b" ]' "$k" "$MONO"
+done
+check "osd.sh есть и синтаксис верный" bash -n "$D/config/quickshell/scripts/osd.sh"
+
 echo "== шейдера и автоблокировки в райсе нет =="
 check "слово shader нигде в dotfiles не встречается" bash -c '! grep -rIli "shader" "$0/dotfiles"' "$ROOT"
 check "hypridle не запускается из rice" bash -c '! grep -q "start hypridle" "$HOME/.local/bin/rice"'

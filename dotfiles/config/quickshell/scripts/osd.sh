@@ -14,5 +14,6 @@ case "$1" in
     quickshell ipc call osd show "$kind" "${pct:-0}" ;;
   bri*)
     pct=$(brightnessctl -m 2>/dev/null | head -1 | cut -d, -f4 | tr -d '%')
-    quickshell ipc call osd show bri "${pct:-0}" ;;
+    # нет управляемой подсветки (виртуальная машина): плашку не показываем, чтобы не врать «0%»
+    [ -n "$pct" ] && quickshell ipc call osd show bri "$pct" ;;
 esac

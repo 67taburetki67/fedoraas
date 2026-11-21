@@ -237,8 +237,12 @@ themes_setup() {
   "$HOME/.local/bin/theme-gen" cat 340 55 paws >/dev/null || warn "тема cat не создалась"
   gen_wallpapers
   # при установке обои и перезагрузку сессии не трогаем (THEME_NO_RELOAD), и ввода у команды нет
-  if ! THEME_NO_RELOAD=1 timeout 60 "$HOME/.local/bin/theme" gray </dev/null >/dev/null 2>&1; then
-    fail "не удалось применить тему gray (запусти ~/.local/bin/theme gray и посмотри ошибку)"
+  # при повторной установке остаётся выбранная тема, а не сбрасывается на gray
+  local cur
+  cur=$(cat "$HOME/.config/themes/current" 2>/dev/null)
+  [ -f "$HOME/.config/themes/themes/${cur:-gray}.env" ] || cur=gray
+  if ! THEME_NO_RELOAD=1 timeout 60 "$HOME/.local/bin/theme" "${cur:-gray}" </dev/null >/dev/null 2>&1; then
+    fail "не удалось применить тему ${cur:-gray} (запусти ~/.local/bin/theme ${cur:-gray} и посмотри ошибку)"
   fi
 }
 
